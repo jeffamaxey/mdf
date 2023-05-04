@@ -31,9 +31,7 @@ def _ipython_active():
         return False
 
     try:
-        if IPython.__version__ >= "0.12":
-            return __IPYTHON__
-        return __IPYTHON__active
+        return __IPYTHON__ if IPython.__version__ >= "0.12" else __IPYTHON__active
     except NameError:
         return False
 
@@ -56,9 +54,11 @@ def get_wx_app(redirect=False):
     if _wx_app is None:
         if _in_ipython:
             _wx_app = guisupport.get_app_wx()
-            if IPython.__version__ >= "0.12":
-                if kernelapp.IPKernelApp.initialized():
-                    eventloops.enable_gui("wx")
+            if (
+                IPython.__version__ >= "0.12"
+                and kernelapp.IPKernelApp.initialized()
+            ):
+                eventloops.enable_gui("wx")
             inputhook.enable_wx(_wx_app)
             guisupport.start_event_loop_wx(_wx_app)
         else:
@@ -117,9 +117,7 @@ def updating_guard():
     return an object that will stop the current frame from updating
     using with semantics
     """
-    if _frame is None:
-        return None
-    return _frame.UpdatingGuard(_frame)
+    return None if _frame is None else _frame.UpdatingGuard(_frame)
 
 
 def open(filename, redirect=False):
@@ -127,11 +125,7 @@ def open(filename, redirect=False):
     Opens a new mdf viewer with a picked context file.
     """
     # get/create a wx.App
-    if _in_ipython:
-        app = guisupport.get_app_wx()
-    else:
-        app = wx.App(redirect=redirect)
-
+    app = guisupport.get_app_wx() if _in_ipython else wx.App(redirect=redirect)
     frame = MDFViewerFrame(None, -1, "MDF Viewer", size=(800, 600))
     frame.CenterOnScreen()
     frame.Open(filename)

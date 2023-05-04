@@ -200,9 +200,9 @@ def start_server(name=None, pipe=None):
         ns.register(name, uri)
 
     print ("mdf.remote server started")
-    print ("URI=%s" % uri)
+    print(f"URI={uri}")
     if name:
-        print ("Name=%s" % name)
+        print(f"Name={name}")
     sys.stdout.flush()
 
     if pipe:

@@ -261,7 +261,7 @@ class ShiftSet(dict):
         # from the shift set).
         net_shift_set = cython.declare(dict)
         net_shift_set = dict(ctx._shift_set)
-        net_shift_set.update(self)
+        net_shift_set |= self
 
         # get the shift key and add it to the cache
         shift_key = _make_shift_key(net_shift_set)
@@ -354,7 +354,7 @@ class MDFContext(object):
         self._all_child_contexts = {}
         self._shift_set = {}
         self._is_shift_of_cache = {}
-        
+
         # a hashable key (tuple) is stored to identify the shift set for this context,
         # and also a set of that tuple to be used by the 'is_shift_of' method to avoid
         # constructing a set each time it's called which is costly when there are large
@@ -371,7 +371,7 @@ class MDFContext(object):
 
             # all the shifts from the parent apply to this context too as
             # well as the newly shifted node
-            self._shift_set.update(_shift_parent._shift_set)
+            self._shift_set |= _shift_parent._shift_set
             self._shift_set.update(_shift_set)
 
             self._shift_key = _make_shift_key(self._shift_set)
@@ -393,14 +393,15 @@ class MDFContext(object):
             # as it must already be set in that context and so there's no need to set
             # it in this one.
             for node, value in self._shift_set.iteritems():
-                if node is not _now_node:
-                    if isinstance(value, MDFNode) \
-                    or node.get_alt_context(self) is self:
-                        self[node] = value
+                if node is not _now_node and (
+                    isinstance(value, MDFNode)
+                    or node.get_alt_context(self) is self
+                ):
+                    self[node] = value
 
         # if this context is a root context set the now node's value
         if _shift_parent is None \
-        or (len(self._shift_set) == 1 and _now_node in self._shift_set):
+            or (len(self._shift_set) == 1 and _now_node in self._shift_set):
             self[_now_node] = self._shift_set.get(_now_node, self._now)
 
         # stop further modifications to the context, if it's shifted
@@ -451,31 +452,31 @@ class MDFContext(object):
             node.clear(self)
 
     def __str__(self):
-        if self._shift_set:
-            # don't use ctx.get_value here as it adds dependencies
-            shifts = sorted([(node.name, node, shift) for (node, shift) in self._shift_set.items()])
-            shifts = [(node, shift) for (name, node, shift) in shifts]
-            shifts_strs = []
+        if not self._shift_set:
+            return "<ctx %d: %s>" % (self._id, self._now.strftime("%Y-%m-%d"))
+        # don't use ctx.get_value here as it adds dependencies
+        shifts = sorted([(node.name, node, shift) for (node, shift) in self._shift_set.items()])
+        shifts = [(node, shift) for (name, node, shift) in shifts]
+        shifts_strs = []
 
-            for node, value in shifts:
-                if isinstance(value, MDFNode):
-                    value = value.name.rsplit(".")[-1]
+        for node, value in shifts:
+            if isinstance(value, MDFNode):
+                value = value.name.rsplit(".")[-1]
 
-                # string format it sensibly
-                if isinstance(value, datetime):
-                    value = value.strftime("%Y-%m-%d")
-                value = str(value)
-                if len(value) > 10:
-                    value = value[:10] + "..."
+            # string format it sensibly
+            if isinstance(value, datetime):
+                value = value.strftime("%Y-%m-%d")
+            value = str(value)
+            if len(value) > 10:
+                value = f"{value[:10]}..."
 
-                # add the k=v string to be printed later
-                shifted_name = node.name.rsplit(".")[-1]
-                shifts_strs.append("%s=%s" % (shifted_name, value))
+            # add the k=v string to be printed later
+            shifted_name = node.name.rsplit(".")[-1]
+            shifts_strs.append(f"{shifted_name}={value}")
 
-            return "<ctx %d: %s [%s]>" % (self._id,
-                                          self._now.strftime("%Y-%m-%d"),
-                                          ", ".join(shifts_strs))
-        return "<ctx %d: %s>" % (self._id, self._now.strftime("%Y-%m-%d"))
+        return "<ctx %d: %s [%s]>" % (self._id,
+                                      self._now.strftime("%Y-%m-%d"),
+                                      ", ".join(shifts_strs))
 
     def __repr__(self):
         return "<%s at %d>" % (str(self).strip("<>"), id(self))
@@ -491,11 +492,11 @@ class MDFContext(object):
 
         # check the type of shift_set_ and construct a new ShiftSet if required
         shift_set = cython.declare(ShiftSet)
-        if not isinstance(shift_set_, ShiftSet):
-            shift_set = ShiftSet(shift_set_)
-        else:
-            shift_set = shift_set_
-
+        shift_set = (
+            shift_set_
+            if isinstance(shift_set_, ShiftSet)
+            else ShiftSet(shift_set_)
+        )
         # if a context already exists for this shift set then return it.
         parent = cython.declare(MDFContext)
         parent = self._parent or self
@@ -562,9 +563,8 @@ class MDFContext(object):
         # If it has it's possibly a node that's been named badly and
         # will cause problems when pickling/unpickling if not renamed
         # so it's unique.
-        if not _allow_duplicate_nodes: 
-            if (node.name, node.is_bound) in _all_nodes:
-                raise DuplicateNodeError(node)
+        if not _allow_duplicate_nodes and (node.name, node.is_bound) in _all_nodes:
+            raise DuplicateNodeError(node)
 
         # add the new node to the dict
         _all_nodes[(node.name, node.is_bound)] = node
@@ -687,26 +687,30 @@ class MDFContext(object):
             for shifted_ctx in all_shifted_contexts:
                 shifted_shift_set = shifted_ctx.get_shift_set()
                 try:
-                    if shifted_shift_set[_now_node] is shifted_now:
-                        if shifted_ctx is not self:
-                            all_contexts[num_contexts] = shifted_ctx
-                            num_contexts += 1
-                            if shifted_ctx._has_nodes_requiring_set_date_callback:
-                                contexts_with_set_date_callbacks.append(shifted_ctx)
-                                have_on_set_date_callbacks = True
+                    if (
+                        shifted_shift_set[_now_node] is shifted_now
+                        and shifted_ctx is not self
+                    ):
+                        all_contexts[num_contexts] = shifted_ctx
+                        num_contexts += 1
+                        if shifted_ctx._has_nodes_requiring_set_date_callback:
+                            contexts_with_set_date_callbacks.append(shifted_ctx)
+                            have_on_set_date_callbacks = True
                 except KeyError:
                     pass
         else:
             # now hasn't been shifted in this context so include all
             # other contexts also not shifted by now
             for shifted_ctx in all_shifted_contexts:
-                if _now_node not in shifted_ctx.get_shift_set():
-                    if shifted_ctx is not self:
-                        all_contexts[num_contexts] = shifted_ctx
-                        num_contexts += 1
-                        if shifted_ctx._has_nodes_requiring_set_date_callback:
-                            contexts_with_set_date_callbacks.append(shifted_ctx)
-                            have_on_set_date_callbacks = True
+                if (
+                    _now_node not in shifted_ctx.get_shift_set()
+                    and shifted_ctx is not self
+                ):
+                    all_contexts[num_contexts] = shifted_ctx
+                    num_contexts += 1
+                    if shifted_ctx._has_nodes_requiring_set_date_callback:
+                        contexts_with_set_date_callbacks.append(shifted_ctx)
+                        have_on_set_date_callbacks = True
 
         # trim any unused slots
         all_contexts = all_contexts[:num_contexts]
@@ -907,9 +911,11 @@ class MDFContext(object):
         try:
             # shifted contexts are immutable, with the exception of the now
             # node if the context is shifted by now
-            if self._finalized \
-            and self._shift_set \
-            and not (node is _now_node and node in self._shift_set):
+            if (
+                self._finalized
+                and self._shift_set
+                and (node is not _now_node or node not in self._shift_set)
+            ):
                 raise AttributeError("Shifted contexts are read-only")
 
             # unwrap if necessary
@@ -963,8 +969,8 @@ class MDFContext(object):
             except KeyError:
                 prev_ctx = None
 
-            if prev_ctx is None:
-                prev_ctx = self
+        if prev_ctx is None:
+            prev_ctx = self
 
         if len(prev_ctx._node_eval_stack) > 0:
             return prev_ctx._node_eval_stack[-1]
@@ -1009,25 +1015,21 @@ class MDFContext(object):
         returns an object using with semantics for timing a node evaluation.
         This is called from node sub-classes to indicate the node is doing work.
         """
-        if _profiling_enabled:
-            return NodeOrBuilderTimer(self, node)
-        return _null_timer
+        return NodeOrBuilderTimer(self, node) if _profiling_enabled else _null_timer
 
     def _profile_builder(self, builder):
         """used by mdf.run"""
-        if _profiling_enabled:
-            return NodeOrBuilderTimer(self, builder)
-        return _null_timer
+        return NodeOrBuilderTimer(self, builder) if _profiling_enabled else _null_timer
 
     def all_nodes(self):
         """
         returns a set of all nodes that have been called in this context
         """
-        nodes_with_value = set()
-        for node in _all_nodes.itervalues():
-            if node.has_value(self) or node.was_called(self):
-                nodes_with_value.add(node)
-        return nodes_with_value
+        return {
+            node
+            for node in _all_nodes.itervalues()
+            if node.has_value(self) or node.was_called(self)
+        }
 
     def visit_nodes(self, visitor, root_nodes=None, categories=None):
         """
@@ -1056,12 +1058,9 @@ class MDFContext(object):
         dependencies = []
 
         if root_nodes is not None:
-            for node in root_nodes:
-                dependencies.append((node, self))
+            dependencies.extend((node, self) for node in root_nodes)
         else:
-            for node in self.all_nodes():
-                dependencies.append((node, self))
-
+            dependencies.extend((node, self) for node in self.all_nodes())
         if categories is not None:
             categories = set(categories)
 
@@ -1077,19 +1076,17 @@ class MDFContext(object):
             # if no categories were specified or this node is in one of
             # those categories call visitor
             if categories is None \
-            or categories.intersection(node.categories):
+                or categories.intersection(node.categories):
                 # if the visitor doesn't return True early-out (ignore
                 # None as probably most people that use this won't return
                 # anything).
                 result = visitor(node, ctx)
                 if not result and result is not None:
                     return False
-    
+
             # add any dependencies of this node
             deps = node.get_dependencies(ctx)
-            for node, ctx in deps:
-                dependencies.append((node, ctx))
-
+            dependencies.extend((node, ctx) for node, ctx in deps)
         # return True to indicate the function didn't early-out
         return True
 
@@ -1198,7 +1195,7 @@ class MDFContext(object):
         """
         from to_dot import _to_dot
         colors = dict(colors)
-        colors.update(self._dot_colors)
+        colors |= self._dot_colors
         return _to_dot(self, filename, nodes, colors, all_contexts, max_depth, rankdir)
 
 def _get_current_context(thread_id=None):
@@ -1325,10 +1322,8 @@ def get_nodes(category=None):
         category = [category]
     categories = set(category)
 
-    # get all nodes matching categories    
-    nodes = []
-    for node in _all_nodes.itervalues():
-        if categories.intersection(node.categories):
-            nodes.append(node)
-
-    return nodes
+    return [
+        node
+        for node in _all_nodes.itervalues()
+        if categories.intersection(node.categories)
+    ]

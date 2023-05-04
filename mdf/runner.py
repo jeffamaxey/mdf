@@ -80,7 +80,6 @@ def run(date_range,
     """
     unshifted_ctx = _create_context(date_range[0], values, ctx, **kwargs)
     contexts = [unshifted_ctx]
-    callbacks_per_ctx = {}
     generators_per_ctx = {}
 
     profiling_enabled = _profiling_is_enabled()
@@ -116,20 +115,17 @@ def run(date_range,
             shifted_ctx = unshifted_ctx.shift(shift_set)
             contexts.append(shifted_ctx)
 
-    for ctx in contexts:
-        callbacks_per_ctx[ctx.get_id()] = list(callbacks)
-
+    callbacks_per_ctx = {ctx.get_id(): list(callbacks) for ctx in contexts}
     for date in date_range:
         unshifted_ctx.set_date(date)
 
         for ctx in contexts:
             # skip dates where the filter doesn't return True
-            if filter is not None:
-                if not ctx.get_value(filter):
-                    _logger.debug("Skipping %s" % date)
-                    continue
+            if filter is not None and not ctx.get_value(filter):
+                _logger.debug(f"Skipping {date}")
+                continue
 
-            _logger.debug("Processing %s %s" % (date, ctx))
+            _logger.debug(f"Processing {date} {ctx}")
             ctx_id = ctx.get_id()
 
             # advance the generators
@@ -161,9 +157,7 @@ def run(date_range,
             if found_generator:
                 callbacks_per_ctx[ctx_id] = [x for x in callbacks if x is not None]
 
-    if shifts:
-        return contexts
-    return unshifted_ctx
+    return contexts if shifts else unshifted_ctx
 
 def _start_remote_server(argv, pipe):
     """
@@ -350,9 +344,7 @@ def get_final_values(date_range, nodes, values={}, filter=None, ctx=None, tzinfo
     ctx = run(date_range, [collector], values=values, filter=filter, ctx=ctx, tzinfo=tzinfo, **kwargs)
     values = collector.get_values(ctx)
 
-    if return_as_list:
-        return values
-    return values[0]
+    return values if return_as_list else values[0]
 
 def scenario(date_range,
                 result_node,
@@ -372,12 +364,9 @@ def scenario(date_range,
     # build a list of shifts from the x and y shifts
     shifts = []
     for y_value in y_shifts:
-        for x_value in x_shifts:
-            shifts.append({
-                x_node: x_value,
-                y_node: y_value
-            })
-
+        shifts.extend(
+            {x_node: x_value, y_node: y_value} for x_value in x_shifts
+        )
     # collect the values for result_node for all the shifts
     contexts = run(date_range,
                     [collector],

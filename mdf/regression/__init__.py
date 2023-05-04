@@ -8,6 +8,7 @@ The different virtual envs are used by starting python
 in subprocesses in the virtual envs and run a pyro server
 that serves remote context objects (see mdf.remote).
 """
+
 import sys
 import os
 import getpass
@@ -48,10 +49,12 @@ _logger = logging.getLogger(__name__)
 _is_x64 = platform.architecture()[0] == "64bit"
 
 _python_exes = {
-    "win32"     : r"C:\VirtualEnvs%s\%%s\Scripts\python.exe" % (
-                    ("_x64" if _is_x64 else "")),
-    "linux2"    : "%s/virtualEnvs/%%s/bin/python" % (
-                    os.environ.get("HOME", "/users/%s" % getpass.getuser()))
+    "win32": r"C:\VirtualEnvs%s\%%s\Scripts\python.exe"
+    % (("_x64" if _is_x64 else "")),
+    "linux2": (
+        "%s/virtualEnvs/%%s/bin/python"
+        % os.environ.get("HOME", f"/users/{getpass.getuser()}")
+    ),
 }
 
 NoneType = type(None)
@@ -79,10 +82,10 @@ def _fh_redirect(fh_in, fh_out, prefix):
     # using a fh as an iterator does some internal buffering,
     # so this isn't equivalent to doing 'for line in fh_in...'
     while not fh_in.closed:
-        line = fh_in.readline()
-        if not line:
+        if line := fh_in.readline():
+            fh_out.write(f"{prefix} : " + line.strip("\r\n") + "\n")
+        else:
             break
-        fh_out.write(prefix + " : " + line.strip("\r\n") + "\n")
 
 def _start_pyro_subprocess(python_exe, side, modulenames=[],
                  init_func=None, startup_data={}):
@@ -101,7 +104,7 @@ def _start_pyro_subprocess(python_exe, side, modulenames=[],
     }
     if init_func is not None:
         _start_data["init_func"] = marshal.dumps(init_func.func_code)
-    _start_data.update(startup_data)
+    _start_data |= startup_data
 
 
     if python_exe is None:
@@ -124,7 +127,7 @@ def _start_pyro_subprocess(python_exe, side, modulenames=[],
             # got the script from the metadata, now write it to a tempfile
             fd, script = tempfile.mkstemp(".py")
             _temp_files.append(script)
-    
+
             fh = os.fdopen(fd, "wt")
             fh.write(script_contents)
             fh.close()
@@ -140,14 +143,18 @@ def _start_pyro_subprocess(python_exe, side, modulenames=[],
             env.pop(x, None)
 
         # add the virtualenv specific bits
-        env.update({
-            "PATH"          : ";".join((os.path.dirname(python_exe), os.environ.get("PATH", ""))),
-            "PYVPATH"       : os.path.dirname(python_exe),
-            "VIRTUAL_ENV"   : os.path.abspath(os.path.join(os.path.dirname(python_exe), "..")),
-        })
+        env |= {
+            "PATH": ";".join(
+                (os.path.dirname(python_exe), os.environ.get("PATH", ""))
+            ),
+            "PYVPATH": os.path.dirname(python_exe),
+            "VIRTUAL_ENV": os.path.abspath(
+                os.path.join(os.path.dirname(python_exe), "..")
+            ),
+        }
 
     if not os.path.exists(script):
-        raise IOError("'%s' not found" % script)
+        raise IOError(f"'{script}' not found")
 
     cmd = [python_exe, "-u", script, "--fork"]
 

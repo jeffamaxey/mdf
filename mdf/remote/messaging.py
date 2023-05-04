@@ -84,7 +84,7 @@ def unregister_message_handler(subject, callback):
     """
     handlers = _handlers.get(subject, [])
     if callback not in handlers:
-        raise RuntimeError("%s/%s handler not registered" % (subject, callback))
+        raise RuntimeError(f"{subject}/{callback} handler not registered")
     handlers.remove(callback)
 
 @needs_zmq

@@ -58,18 +58,15 @@ def _get_calling_module_and_class():
             module = None
             if hasattr(frame, "__module__"):
                 module = sys.modules.get(frame.__module__)
-            else:
-                # look for the module by filename
-                filename = frame.f_code.co_filename
-                if filename:
-                    file_base, ext = os.path.splitext(filename)
-                    for m in sys.modules.values():
-                        if hasattr(m, "__file__"):
-                            # ignore the .py/.pyc suffixes
-                            m_base, ext = os.path.splitext(m.__file__)
-                            if m_base == file_base:
-                                module = m
-                                break
+            elif filename := frame.f_code.co_filename:
+                file_base, ext = os.path.splitext(filename)
+                for m in sys.modules.values():
+                    if hasattr(m, "__file__"):
+                        # ignore the .py/.pyc suffixes
+                        m_base, ext = os.path.splitext(m.__file__)
+                        if m_base == file_base:
+                            module = m
+                            break
             if getattr(module, "__package__", None) != this_package:
                 clsname = frame.f_code.co_name
                 if clsname == "<module>":
@@ -136,9 +133,7 @@ def _get_module_name(module):
     # multiprocessing imports the __main__ module into a new module called
     # __parents_main__ and then renames it. We need the modulename to
     # always be the same as the one in the parent process.
-    if module.__name__ == "__parents_main__":
-        return "__main__"
-    return module.__name__
+    return "__main__" if module.__name__ == "__parents_main__" else module.__name__
 
 class NodeState(object):
     """
@@ -181,30 +176,49 @@ class NodeState(object):
         self.generator = None
 
     def __repr__(self):
-        return "<NodeState>" + "\n\t".join([
-            "ctx_id: %s" % self.ctx_id,
-            "dirty_flags: %s" % self.dirty_flags,
-            "has_value: %s" % self.has_value,
-            "called: %s" % self.called,
-            "date: %s" % self.date,
-            "value: %s" % self.value,
-            "alt_context: %s" % self.alt_context,
-            "prev_alt_context: %s" % self.prev_alt_context,
-            "override: %s" % self.override,
-            "override_cache: %s" % self.override_cache,
-            "callers: %s" % ( 
-                ("\n\t\t" +
-                "\n\t\t".join("<ctx %d> : %s" % (
-                    k, "\n\t\t\t".join([n.name for n in v])) for k, v in self.callers.iteritems()))
-                if self.callers else ""
-            ),
-            "callees: %s" % ( 
-                ("\n\t\t" +
-                "\n\t\t".join("<ctx %d> : %s" % (
-                    k, "\n\t\t\t".join([n.name for n in v])) for k, v in self.callees.iteritems()))
-                if self.callees else ""
-            ),
-        ]) + "\n</NodeState>"
+        return (
+            "<NodeState>"
+            + "\n\t".join(
+                [
+                    f"ctx_id: {self.ctx_id}",
+                    f"dirty_flags: {self.dirty_flags}",
+                    f"has_value: {self.has_value}",
+                    f"called: {self.called}",
+                    f"date: {self.date}",
+                    f"value: {self.value}",
+                    f"alt_context: {self.alt_context}",
+                    f"prev_alt_context: {self.prev_alt_context}",
+                    f"override: {self.override}",
+                    f"override_cache: {self.override_cache}",
+                    "callers: %s"
+                    % (
+                        (
+                            "\n\t\t"
+                            + "\n\t\t".join(
+                                "<ctx %d> : %s"
+                                % (k, "\n\t\t\t".join([n.name for n in v]))
+                                for k, v in self.callers.iteritems()
+                            )
+                        )
+                        if self.callers
+                        else ""
+                    ),
+                    "callees: %s"
+                    % (
+                        (
+                            "\n\t\t"
+                            + "\n\t\t".join(
+                                "<ctx %d> : %s"
+                                % (k, "\n\t\t\t".join([n.name for n in v]))
+                                for k, v in self.callees.iteritems()
+                            )
+                        )
+                        if self.callees
+                        else ""
+                    ),
+                ]
+            )
+        ) + "\n</NodeState>"
 
 class MDFIterator(object):
     """
@@ -339,7 +353,7 @@ class ConditionalDependencyError(Exception):
                 if traverse:
                     display_name = called_node.name
                     if called_node in diff_nodes:
-                        display_name = "** %s **" % display_name
+                        display_name = f"** {display_name} **"
                     dep_tree.append(("  " * indent_level) + "-> " + display_name)
                     dep_tree.extend(flatten_dependency_tree(called_node,
                                                             called_ctx,
@@ -349,16 +363,30 @@ class ConditionalDependencyError(Exception):
         dep_tree = [node.name] + flatten_dependency_tree(node, alt_ctx)
         dep_tree =  "\n".join(dep_tree)
 
-        Exception.__init__(self,
-                   (("Error evaluating %s[%s]\n\n" % (node.name, ctx)) +
-                    ("Evaluated %s in %s, but a dependency has " % (node.name, alt_ctx)) +
-                    ("changed that requires the shifted context %s " % new_alt_ctx) +
-                    ("to be used instead.\n") +
-                    ("This is most likely be due to a conditional dependency "
-                     "on one or more of the following nodes: \n\n%s" % 
-                        "\n".join(["  %s" % x.name for x in diff_nodes])) +
-                    ("\n\nMake that dependency unconditional to fix.") +
-                    ("\n\n%s" % dep_tree)))
+        Exception.__init__(
+            self,
+            (
+                (
+                    (
+                        (
+                            (
+                                "Error evaluating %s[%s]\n\n" % (node.name, ctx)
+                                + f"Evaluated {node.name} in {alt_ctx}, but a dependency has "
+                            )
+                            + f"changed that requires the shifted context {new_alt_ctx} "
+                        )
+                        + "to be used instead.\n"
+                    )
+                    + (
+                        "This is most likely be due to a conditional dependency "
+                        "on one or more of the following nodes: \n\n%s"
+                        % "\n".join([f"  {x.name}" for x in diff_nodes])
+                    )
+                    + "\n\nMake that dependency unconditional to fix."
+                )
+                + "\n\n%s" % dep_tree
+            ),
+        )
 
 class MDFNode(MDFNodeBase):
     """
@@ -412,10 +440,7 @@ class MDFNode(MDFNodeBase):
                 module = inspect.getmodule(cls)
             self._modulename = modulename or _get_module_name(module)
             if fqname is None:
-                self._name = "%s.%s:%s.%s" % (self._modulename,
-                                                cls.__name__,
-                                                base_cls.__name__,
-                                                name)
+                self._name = f"{self._modulename}.{cls.__name__}:{base_cls.__name__}.{name}"
         else:
             module, clsname = _get_calling_module_and_class()
             if module is not None or clsname is not None:
@@ -429,16 +454,16 @@ class MDFNode(MDFNodeBase):
 
                 if fqname is None:
                     if clsname:
-                        self._name = "%s.%s.%s" % (self._modulename, clsname, name)
+                        self._name = f"{self._modulename}.{clsname}.{name}"
                     else:
-                        self._name = "%s.%s" % (self._modulename, name)
+                        self._name = f"{self._modulename}.{name}"
 
         # dict of NodeStates per context
         self._states = {}
         MDFContext.register_node(self)
 
     def __str__(self):
-        return "<%s [name=%s]>" % (self.__class__, self._name)
+        return f"<{self.__class__} [name={self._name}]>"
 
     def __repr__(self):
         return "<%s [name=%s] at 0x%x>" % (self.__class__, self._name, id(self))
@@ -473,26 +498,26 @@ class MDFNode(MDFNodeBase):
     # NB: Cython arithmetic operator methods behave differently; there are no __r*__ variants.
     # See: http://docs.cython.org/src/userguide/special_methods.html#arithmetic-methods
     # 
-    def __add__(lhs, rhs):
-        return MDFNode._commutative_binop("__add__", lhs, rhs)
+    def __add__(self, rhs):
+        return MDFNode._commutative_binop("__add__", self, rhs)
     
-    def __mul__(lhs, rhs):
-        return MDFNode._commutative_binop("__mul__", lhs, rhs)
+    def __mul__(self, rhs):
+        return MDFNode._commutative_binop("__mul__", self, rhs)
     
-    def __sub__(lhs, rhs):
-        if isinstance(lhs, MDFNode):
-            return MDFNode._op("__sub__", lhs, rhs)
-        return -rhs + lhs
+    def __sub__(self, rhs):
+        if isinstance(self, MDFNode):
+            return MDFNode._op("__sub__", self, rhs)
+        return -rhs + self
     
-    def __div__(lhs, rhs):
-        if isinstance(lhs, MDFNode):
-            return MDFNode._commutative_binop("__div__", lhs, rhs)
-        return (_one_node / rhs) * lhs
+    def __div__(self, rhs):
+        if isinstance(self, MDFNode):
+            return MDFNode._commutative_binop("__div__", self, rhs)
+        return _one_node / rhs * self
 
-    def __truediv__(lhs, rhs):
-        if isinstance(lhs, MDFNode):
-            return MDFNode._commutative_binop("__truediv__", lhs, rhs)
-        return (_one_node / rhs) * lhs
+    def __truediv__(self, rhs):
+        if isinstance(self, MDFNode):
+            return MDFNode._commutative_binop("__truediv__", self, rhs)
+        return _one_node / rhs * self
     
     def __neg__(self):
         return MDFNode._op("__neg__", self)
@@ -533,8 +558,7 @@ class MDFNode(MDFNodeBase):
         results = []
         for ctx_id, callees in node_state.callees.iteritems():
             ctx = _get_context(ctx_id, ctx)
-            for callee in callees:
-                results.append((callee, ctx))
+            results.extend((callee, ctx) for callee in callees)
         return results
 
     def _get_state(self, ctx):
@@ -572,8 +596,7 @@ class MDFNode(MDFNodeBase):
         results = []
         for ctx_id, callers in node_state.callers.iteritems():
             ctx = _get_context(ctx_id, ctx)
-            for callee in callers:
-                results.append((callers, ctx))
+            results.extend((callers, ctx) for _ in callers)
         return results        
 
     def clear(self, ctx):
@@ -630,11 +653,9 @@ class MDFNode(MDFNodeBase):
         called_state.callers.setdefault(ctx._id_obj, set()).add(self)
 
         if _trace_enabled:
-            _logger.info("Updated dependency: %s[%s] -> %s[%s]" % (
-                                                           self.name,
-                                                           ctx,
-                                                           called_node.name,
-                                                           called_ctx))
+            _logger.info(
+                f"Updated dependency: {self.name}[{ctx}] -> {called_node.name}[{called_ctx}]"
+            )
 
         # don't add this dependency again
         node_state.add_dependency_cache.add((called_node, called_ctx._id_obj))
@@ -766,7 +787,7 @@ class MDFNode(MDFNodeBase):
 
         name = self._name
         if self._modulename:
-            prefix = "%s." % self._modulename
+            prefix = f"{self._modulename}."
             if name.startswith(prefix):
                 name = name[len(prefix):]
         self._short_name = ".".join([x.split(":")[0] for x in name.split(".")])
@@ -811,7 +832,7 @@ class MDFNode(MDFNodeBase):
         # start off with a reasonable amount of space and just one entry
         to_process = node_state.set_dirty_queue
         cqueue_clear(to_process)
-        
+
         # NodeSetDirtyState objects are used instead of a tuple to avoid having to
         # keep converting native types to python types
         cqueue_push(to_process, create_NodeSetDirtyState(_depth, node_state, self, flags))
@@ -833,20 +854,16 @@ class MDFNode(MDFNodeBase):
             if (node_state.dirty_flags & flags) == flags:
                 if _trace_enabled:
                     ctx = _get_context(node_state.ctx_id)
-                    _logger.info("%s%s[%s] already dirty (%s)" % (
-                                    ("-" * depth) + "> " if depth else "",
-                                    node.name,
-                                    ctx,
-                                    DIRTY_FLAGS.to_string(node_state.dirty_flags)))
+                    _logger.info(
+                        f'{"-" * depth + "> " if depth else ""}{node.name}[{ctx}] already dirty ({DIRTY_FLAGS.to_string(node_state.dirty_flags)})'
+                    )
                 continue
 
             if _trace_enabled:
                 ctx = _get_context(node_state.ctx_id)
-                _logger.info("%s%s[%s] marked dirty (%s)" % (
-                                ("-" * depth) + "> " if depth else "",
-                                node.name,
-                                ctx,
-                                DIRTY_FLAGS.to_string(flags)))
+                _logger.info(
+                    f'{"-" * depth + "> " if depth else ""}{node.name}[{ctx}] marked dirty ({DIRTY_FLAGS.to_string(flags)})'
+                )
 
             # update the dirty flag
             node_state.dirty_flags |= flags
@@ -885,10 +902,7 @@ class MDFNode(MDFNodeBase):
         """
         if _trace_enabled:
             ctx = _get_context(node_state.ctx_id)
-            _logger.info("%s[%s] touched (%s)" % (
-                            self.name,
-                            ctx,
-                            DIRTY_FLAGS.to_string(flags)))
+            _logger.info(f"{self.name}[{ctx}] touched ({DIRTY_FLAGS.to_string(flags)})")
 
         # clear the flags
         node_state.dirty_flags &= ~flags
@@ -919,7 +933,7 @@ class MDFNode(MDFNodeBase):
         # return the cached value if the node isn't dirty
         if node_state.dirty_flags == DIRTY_FLAGS_NONE:
             if _trace_enabled:
-                _logger.debug("Have cached value for %s[%s]" % (self.name, ctx))
+                _logger.debug(f"Have cached value for {self.name}[{ctx}]")
             return self._get_cached_value_and_date(ctx, node_state)[0]
 
         # get the alt context this node should be evaluated in (i.e. the least shifted context
@@ -954,7 +968,7 @@ class MDFNode(MDFNodeBase):
 
             # Set the error flag
             self._set_dirty(node_state, DIRTY_FLAGS_ERR, 0)
-            
+
             # and re-raise
             raise
 
@@ -995,7 +1009,7 @@ class MDFNode(MDFNodeBase):
         returns the cached value and date for this node in a context
         """
         if not node_state.has_value:
-            raise KeyError("%s not found in %s" % (self.name, ctx))
+            raise KeyError(f"{self.name} not found in {ctx}")
 
         return node_state.value, node_state.date
 
@@ -1126,13 +1140,13 @@ class MDFNode(MDFNodeBase):
         node_state.override = override_node
 
         # reset the state for the root context and all shifts of it
-        all_contexts = set([root_ctx])
+        all_contexts = {root_ctx}
         if root_ctx.get_parent() is not None:
             all_contexts.update(root_ctx.get_parent().get_shifted_contexts())
 
         for ctx in all_contexts:
             if ctx is root_ctx \
-            or ctx.is_shift_of(root_ctx):
+                or ctx.is_shift_of(root_ctx):
                 # let any dependencies know the value of this node is invalid
                 self.set_dirty(ctx, DIRTY_FLAGS_ALL)
 
@@ -1152,10 +1166,7 @@ class MDFNode(MDFNodeBase):
     def _get_override(self, ctx, node_state):
         # if called for this context previously return the cached result
         if node_state.override_cache is not None:
-            if node_state.override_cache is self:
-                return None
-            return node_state.override_cache
-
+            return None if node_state.override_cache is self else node_state.override_cache
         # if there's an override set for this node in this context return that
         if node_state.override is not None:
             node_state.override_cache = node_state.override
@@ -1184,7 +1195,7 @@ class MDFNode(MDFNodeBase):
                 continue
 
             if shifted_node_state.override is not None \
-            and (shifted_ctx is ctx or ctx.is_shift_of(shifted_ctx)):
+                and (shifted_ctx is ctx or ctx.is_shift_of(shifted_ctx)):
                 # shifted_ctx is a shifted version of ctx and has an
                 # override set. If it's more shifted than any previously
                 # encountered use the shift from this context
@@ -1195,9 +1206,9 @@ class MDFNode(MDFNodeBase):
                     # this context then there's no way to sensibly decide which
                     # override to use. This won't usually happen as overrides are
                     # either set on the root context or as a result of shifting.
-                    raise Exception("Ambiguous override found for %s: %s vs. %s" % (self.name,
-                                                                                    best_match,
-                                                                                    shifted_ctx))
+                    raise Exception(
+                        f"Ambiguous override found for {self.name}: {best_match} vs. {shifted_ctx}"
+                    )
 
                 if num_shifts > best_match_num_shifts:
                     best_match = shifted_ctx
@@ -1344,7 +1355,7 @@ class _VarGroupMeta(type):
         super(_VarGroupMeta, self).__init__(cls_name, bases, dict)
 
     def __repr__(self):
-        return "<%s, %s>" % (self._group_name or "vargroup", self._dict)
+        return f'<{self._group_name or "vargroup"}, {self._dict}>'
 
 def vargroup(group_name=None, **kwargs):
     """
@@ -1365,7 +1376,7 @@ def vargroup(group_name=None, **kwargs):
         5
     """
     attribs = dict([(k, varnode(k, default=v, category=group_name)) for k, v in kwargs.iteritems()])
-    cls_name = "%s__%s" % (group_name, str(uuid.uuid4()))
+    cls_name = f"{group_name}__{str(uuid.uuid4())}"
     return _VarGroupMeta(cls_name, bases=(object,), dict=attribs, group_name=group_name)
 
 class MDFEvalNode(MDFNode):
@@ -1463,7 +1474,9 @@ class MDFEvalNode(MDFNode):
         if isinstance(func, types.TypeType) and issubclass(func, MDFIterator):
             return MDFIteratorFactory(func, owner)
 
-        raise Exception("MDFEvalNode._bind_function called with unexpected type %s" % type(func))
+        raise Exception(
+            f"MDFEvalNode._bind_function called with unexpected type {type(func)}"
+        )
 
     # MDFEvalNode is also a descriptor and can be bound to classes
     # to produce new nodes with the target function bound to the class
@@ -1522,8 +1535,8 @@ class MDFEvalNode(MDFNode):
         # date look for a previous value and call the timestep func
         dirty_flags = node_state.dirty_flags
         if self._is_generator \
-        and dirty_flags == DIRTY_FLAGS_TIME \
-        and node_state.generator is not None: 
+            and dirty_flags == DIRTY_FLAGS_TIME \
+            and node_state.generator is not None: 
             # if this node has been valued already for this context
             # check the date and see if it can be updated from that
             try:
@@ -1553,14 +1566,14 @@ class MDFEvalNode(MDFNode):
                         if not needs_update:
                             # re-use the previous value
                             if _trace_enabled:
-                                _logger.debug("Re-using previous value of %s[%s]" % (self.name, ctx))
+                                _logger.debug(f"Re-using previous value of {self.name}[{ctx}]")
 
                             self._touch(node_state, DIRTY_FLAGS_ALL, True)
                             return prev_value
 
                     # call the timestep function with or without the context
                     if _trace_enabled:
-                        _logger.debug("Evaluating next value of %s[%s]" % (self.name, ctx))
+                        _logger.debug(f"Evaluating next value of {self.name}[{ctx}]")
 
                     if _profiling_enabled:
                         with ctx._profile(self):
@@ -1572,9 +1585,9 @@ class MDFEvalNode(MDFNode):
 
         # if still dirty call func to get the new value
         if _trace_enabled:
-            _logger.debug("Evaluating %s[%s] (%s)" % (self.name,
-                                                      ctx,
-                                                      DIRTY_FLAGS.to_string(dirty_flags)))
+            _logger.debug(
+                f"Evaluating {self.name}[{ctx}] ({DIRTY_FLAGS.to_string(dirty_flags)})"
+            )
 
         # call the function, set the value and return it
         if _profiling_enabled:
@@ -1648,20 +1661,21 @@ class MDFEvalNode(MDFNode):
             except KeyError:
                 continue
 
-            if shifted_node_state.called:
-                if shifted_ctx is ctx or ctx.is_shift_of(shifted_ctx):
-                    # ctx is a shift of shifted_ctx so use the dependencies
-                    # from this context to determine the correct alt context
-                    num_shifts = len(shifted_ctx.get_shift_set())
-                    if num_shifts > best_match_num_shifts:
-                        best_match = shifted_ctx
-                        best_match_num_shifts = num_shifts
+            if shifted_node_state.called and (
+                shifted_ctx is ctx or ctx.is_shift_of(shifted_ctx)
+            ):
+                # ctx is a shift of shifted_ctx so use the dependencies
+                # from this context to determine the correct alt context
+                num_shifts = len(shifted_ctx.get_shift_set())
+                if num_shifts > best_match_num_shifts:
+                    best_match = shifted_ctx
+                    best_match_num_shifts = num_shifts
 
-                        # early out if this context is the main context
-                        # since there can't be a candidate that ctx is a
-                        # shift of and is more shifted
-                        if shifted_ctx is ctx:
-                            break
+                    # early out if this context is the main context
+                    # since there can't be a candidate that ctx is a
+                    # shift of and is more shifted
+                    if shifted_ctx is ctx:
+                        break
 
         # if it's never been called before in any related context, use this context
         if best_match is None:
@@ -1678,14 +1692,15 @@ class MDFEvalNode(MDFNode):
         cqueue_push(all_shifted_ctxs, parent)
         for shifted_ctx in parent.iter_shifted_contexts():
             if shifted_ctx is ctx \
-            or shifted_ctx.is_shift_of(ctx) \
-            or ctx.is_shift_of(shifted_ctx):
+                or shifted_ctx.is_shift_of(ctx) \
+                or ctx.is_shift_of(shifted_ctx):
                 cqueue_push(all_shifted_ctxs, shifted_ctx)
 
         # sort so the least shifted are at the start. This should be more optimal
         # for the next loop than if they were in a random order.
         def get_shift_degree(x):
             return len(x.get_shift_set())
+
         cqueue_sort(all_shifted_ctxs, get_shift_degree, False)
 
         best_match_state = cython.declare(NodeState)

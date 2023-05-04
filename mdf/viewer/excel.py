@@ -22,9 +22,9 @@ def _to_range(col, row):
     """returns an Excel range string, e.g. 0, 0 => A1"""
     cell = ""
     while col >= 26:
-        cell = "%s%s" % (chr(ord("A") + (col % 26)), cell)
+        cell = f'{chr(ord("A") + col % 26)}{cell}'
         col = (col // 26) - 1
-    cell = "%s%s" % (chr(ord("A") + (col % 26)), cell) 
+    cell = f'{chr(ord("A") + col % 26)}{cell}'
     cell += "%d" % (row + 1)
     return cell
 
@@ -35,7 +35,7 @@ def _to_numeric_range(cell):
     """
     match = re.match("^\$?([A-Z]+)\$?(\d+)$", cell.upper())
     if not match:
-        raise RuntimeError("'%s' is not a valid excel cell address" % cell)
+        raise RuntimeError(f"'{cell}' is not a valid excel cell address")
     col, row = match.groups()
 
     # A = 1
@@ -58,9 +58,9 @@ def _get_book_and_sheet(app, sheet_name):
     """    
     # split the sheet name into the workbook name and sheet name
     # e.g. "[Book1]Sheet1"
-    match = re.match("^(?:\[(.*)\])?(.*)$", sheet_name)            
+    match = re.match("^(?:\[(.*)\])?(.*)$", sheet_name)
     if not match:
-        raise AssertionError("Error parsing sheet name '%s'" % sheet_name)
+        raise AssertionError(f"Error parsing sheet name '{sheet_name}'")
 
     workbook_name, sheet_name = match.groups()
     if workbook_name is None:
@@ -69,12 +69,12 @@ def _get_book_and_sheet(app, sheet_name):
         try:
             wb = app.Workbooks(workbook_name)
         except pywintypes.com_error:
-            raise RuntimeError("Workbook '%s' not found" % workbook_name)
+            raise RuntimeError(f"Workbook '{workbook_name}' not found")
 
     try:
         sheet = wb.Sheets(sheet_name)
     except pywintypes.com_error:
-        raise RuntimeError("Worksheet '%s' not found" % sheet_name)
+        raise RuntimeError(f"Worksheet '{sheet_name}' not found")
 
     return wb, sheet
 
@@ -104,14 +104,10 @@ def export_dataframe(dataframe,
         New sheets are created if multiple dataframes are supplied.
         Only relevant if sheet_name is None.
     """
-    if isinstance(dataframe, list):
-        dataframes = dataframe
-    else:
-        dataframes = [dataframe]
-    
+    dataframes = dataframe if isinstance(dataframe, list) else [dataframe]
     # get the excel application object and create a new workbook
     app = win32com.client.GetActiveObject("Excel.Application")
-    
+
     # make sure the type wrapper is built so we have access to any constants
     app = win32com.client.gencache.EnsureDispatch(app)
 
@@ -153,23 +149,20 @@ def export_dataframe(dataframe,
 
         def _format(x):
             # use #NUM! instead of NaN as NaNs show up as 65535 in Excel
-            if isinstance(x, float):
-                if np.isnan(x) or np.isinf(x):
-                    return "#NUM!"
+            if isinstance(x, float) and (np.isnan(x) or np.isinf(x)):
+                return "#NUM!"
             # use a string representation for tuples and lists
-            if isinstance(x, (tuple, list)):
-                return repr(x)
-            return x
-    
+            return repr(x) if isinstance(x, (tuple, list)) else x
+
         while len(dataframes) > 0:
             dataframe = dataframes.pop(0)
-            
+
             # set the index in the first column
             sheet.Range(_to_range(top_left_col, top_left_row)).Value = "Index"
             range = sheet.Range(_to_range(top_left_col, top_left_row + 1),
                                 _to_range(top_left_col, top_left_row + len(dataframe.index)))
             range.Value = [[_format(x)] for x in dataframe.index.tolist()]
-    
+
             # copy the columns
             for i, col in enumerate(dataframe.columns):
                 col_num = top_left_col + i + 1

@@ -72,7 +72,7 @@ class PlotPanel(wx.Panel):
             x = dataframe.index
             for col in dataframe.columns:
                 empty = dataframe[col].count() == 0
-                y = dataframe[col].values if not empty else np.zeros(x.shape)
+                y = np.zeros(x.shape) if empty else dataframe[col].values
                 ax.plot(x, y, label=col)
 
         try:

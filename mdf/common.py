@@ -9,10 +9,7 @@ try:
             if type is not None and hasattr(type, '__call__'):
                 # Do not change to 'if value' since 0 could be a valid argument to type(...) but will evaluate
                 # as false.
-                if value is not None:
-                    return type(value)
-                else:
-                    return type
+                return type(value) if value is not None else type
             else:
                 return value
 

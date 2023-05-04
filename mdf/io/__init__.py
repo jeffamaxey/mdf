@@ -48,7 +48,7 @@ def save_context(ctx, filename, start_date=None, end_date=None):
 
         base, ext = os.path.splitext(filename)
         if ext == ".zip":
-            inner_filename = os.path.basename(base) + ".dag"
+            inner_filename = f"{os.path.basename(base)}.dag"
             fh = SimpleZipFile(filename, inner_filename=inner_filename, mode="w+b")
         elif ext == ".bz2":
             fh = BZ2File(filename, "wb") # w+b isn't a valid mode for BZ2File

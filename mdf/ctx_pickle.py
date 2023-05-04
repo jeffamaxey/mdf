@@ -127,10 +127,11 @@ def _pickle_context(ctx):
     # get the cached values for all nodes in any of the contexts we're interested in
     node_states = []
     for node in _all_nodes.itervalues():
-        for ctx_id, node_state in node._states.iteritems():
-            if ctx_id in all_ctx_ids:
-                node_states.append((ctx_id, node, NodeStateWrapper(node_state)))
-
+        node_states.extend(
+            (ctx_id, node, NodeStateWrapper(node_state))
+            for ctx_id, node_state in node._states.iteritems()
+            if ctx_id in all_ctx_ids
+        )
     return (ctx.__class__,
             ctx.get_id(),
             ctx.get_date(),
@@ -148,7 +149,7 @@ def _get_node(name, is_bound):
     # they're accessed from the class. If we've got this far the only
     # types of nodes that we are looking for are bound class nodes.
     if not is_bound or "." not in name:
-        raise MissingNodeError("Node not found: '%s'" % name)
+        raise MissingNodeError(f"Node not found: '{name}'")
 
     # the module that this node is defined in should already have been imported
     components = name.split(".")
@@ -160,7 +161,7 @@ def _get_node(name, is_bound):
         modulename = ".".join((modulename, components[0]))
 
     if not components or not module:
-        raise MissingNodeError("Node not found: '%s'" % name)
+        raise MissingNodeError(f"Node not found: '{name}'")
 
     # get the class and then the node from the module
     obj = module
@@ -177,11 +178,11 @@ def _get_node(name, is_bound):
             for base in cls.mro():
                 if base.__name__ == base_cls:
                     if attr.startswith("__"):
-                        attr = "_%s%s" % (base_cls, attr)
+                        attr = f"_{base_cls}{attr}"
                     obj = base.__dict__[attr].__get__(None, cls)
                     break
             else:
-                raise Exception("%s is not a class base of %s: '%s'" % (base_cls, attr, name))
+                raise Exception(f"{base_cls} is not a class base of {attr}: '{name}'")
         else:
             obj = getattr(obj, attr)
 
@@ -227,11 +228,10 @@ def _unpickle_context(cls, ctx_id, now, node_states, shift_sets):
             node_state.callers[new_caller_ctx_id] = callers
 
         node_state_callees = node_state.callees
-        node_state.callees = {}
-        for callee_ctx_id, callees in node_state_callees.iteritems():
-            new_callee_ctx_id = ctx_id_fixup[callee_ctx_id]
-            node_state.callees[new_callee_ctx_id] = callees
-
+        node_state.callees = {
+            ctx_id_fixup[callee_ctx_id]: callees
+            for callee_ctx_id, callees in node_state_callees.iteritems()
+        }
         new_ctx_id = ctx_id_fixup[ctx_id]
         node._states[new_ctx_id] = node_state
 
@@ -243,18 +243,17 @@ def _pickle_node_state(node_state_wrapper):
     """
     node_state = cython.declare(NodeState)
     node_state = node_state_wrapper.node_state
-    attribs = {}
     extra_attribs = {}
 
-    # get the standard attributes that can be pickled as they are
-    attribs["has_value"] = node_state.has_value
-    attribs["date"] = node_state.date
-    attribs["value"] = node_state.value
-    attribs["called"] = node_state.called
-    attribs["callers"] = node_state.callers
-    attribs["callees"] = node_state.callees
-    attribs["override"] = node_state.override
-
+    attribs = {
+        "has_value": node_state.has_value,
+        "date": node_state.date,
+        "value": node_state.value,
+        "called": node_state.called,
+        "callers": node_state.callers,
+        "callees": node_state.callees,
+        "override": node_state.override,
+    }
     # store context and override references as ids instead of objects
     if node_state.alt_context:
         extra_attribs["alt_context_id"] = node_state.alt_context.get_id()
@@ -313,13 +312,11 @@ def _pickle_node(node):
 def _unpickle_node(node_name, modulename, is_bound, vardata=None):
     """returns an MDFNode object from the pickled results of _pickle_node"""
     # make sure all the required module is imported
-    _log.debug("Unpickling node %s from module %s" % (node_name, modulename))
-    if modulename:
-        if modulename not in sys.modules:
-
-            # TODO: we have to reference __builtin__ for now due to the way the import hook works
-            # in the cluster. Get rid of it once a more stable import hook is implemented.
-            __import__(modulename)
+    _log.debug(f"Unpickling node {node_name} from module {modulename}")
+    if modulename and modulename not in sys.modules:
+        # TODO: we have to reference __builtin__ for now due to the way the import hook works
+        # in the cluster. Get rid of it once a more stable import hook is implemented.
+        __import__(modulename)
 
     # get the node and return it (there's no state to recover)
     try:
@@ -331,7 +328,7 @@ def _unpickle_node(node_name, modulename, is_bound, vardata=None):
     # if the above block didn't return or raise then it must be a varnode
     # that hasn't been created (possibly one that was originally dynamically
     # created) so re-create it now.
-    _log.debug("Creating new varnode node %s" % node_name)
+    _log.debug(f"Creating new varnode node {node_name}")
     return MDFVarNode(name=node_name,
                       fqname=node_name,
                       default=vardata["default"],

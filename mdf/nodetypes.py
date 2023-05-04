@@ -28,9 +28,7 @@ _python_version = cython.declare(int, sys.version_info[0])
 
 @cython.cfunc
 def _dict_iteritems(d):
-    if _python_version > 2:
-        return iter(d.items())
-    return d.iteritems()
+    return iter(d.items()) if _python_version > 2 else d.iteritems()
 
 
 # strings are used as dict lookups using nans and np.float64 can be problematic
@@ -84,13 +82,12 @@ class MDFCustomNodeIterator(MDFIterator):
     def next(self):
         if self.custom_node._call_with_no_value:
             value = None
+        elif self.is_generator:
+            if not self.value_generator:
+                self.value_generator = self.func()
+            value = next(self.value_generator)
         else:
-            if self.is_generator:
-                if not self.value_generator:
-                    self.value_generator = self.func()
-                value = next(self.value_generator)
-            else:
-                value = self.func()
+            value = self.func()
 
         if self.node_type_is_generator:
             if not self.node_type_generator:
@@ -348,11 +345,7 @@ class MDFCustomNode(MDFEvalNode):
 
             node = cython.declare(MDFNode)
             for key, node in _dict_iteritems(self._kwnodes):
-                if key not in self.nodetype_node_kwargs:
-                    kwargs[key] = node()
-                else:
-                    kwargs[key] = node
-
+                kwargs[key] = node() if key not in self.nodetype_node_kwargs else node
             for key, value in _dict_iteritems(self._kwfuncs):
                 kwargs[key] = value()
 
@@ -360,9 +353,7 @@ class MDFCustomNode(MDFEvalNode):
         # add it in now (defaulting to True)
         if self._call_with_filter:
             filter_node = self.get_filter()
-            filter_node_value = True
-            if filter_node is not None:
-                filter_node_value = filter_node()
+            filter_node_value = filter_node() if filter_node is not None else True
             kwargs["filter_node_value"] = filter_node_value
 
         if self._call_with_filter_node:
@@ -375,11 +366,7 @@ class MDFCustomNode(MDFEvalNode):
 
     def _cn_eval_func(self):
         # get the inner node value
-        if self._call_with_no_value:
-            value = None
-        else:
-            value = self._cn_func()
-
+        value = None if self._call_with_no_value else self._cn_func()
         # and call the node type function
         kwargs = cython.declare(dict)
         kwargs = self._get_kwargs()
@@ -452,10 +439,8 @@ class MDFCustomNodeMethod(object):
         args = ", ".join(args)
 
         if self._node:
-            return "<MDFCustomNodeMethod %s.%s(%s)>" % (self._node.name,
-                                                         self._method_name,
-                                                         args)
-        return "<unbound MDFCustomNodeMethod %s(%s)>" % (self._method_name, args)                                                         
+            return f"<MDFCustomNodeMethod {self._node.name}.{self._method_name}({args})>"
+        return f"<unbound MDFCustomNodeMethod {self._method_name}({args})>"                                                         
 
     def __call__(self,
                     name=None,
@@ -469,9 +454,7 @@ class MDFCustomNodeMethod(object):
                                               filter=filter,
                                               category=category,
                                               nodetype_func_kwargs=kwargs)
-        if self._call:
-            return derived_node()
-        return derived_node
+        return derived_node() if self._call else derived_node
 
     def _get_derived_node(self,
                             name=None,
@@ -495,7 +478,7 @@ class MDFCustomNodeMethod(object):
                 try:
                     value = _special_floats[str(value)]
                 except KeyError:
-                    value = "1.#%s" % value
+                    value = f"1.#{value}"
             kwargs_in_key.append((key, value))
 
         derived_node_key = (self._node_type_func,
@@ -525,17 +508,15 @@ class MDFCustomNodeMethod(object):
                     if isinstance(v, MDFNode):
                         vs = v.short_name
                         v = v.name
-                    kwarg_strs[i] = "%s=%s" % (k, v)
-                    short_kwarg_strs[i] = "%s=%s" % (k, vs)
-    
+                    kwarg_strs[i] = f"{k}={v}"
+                    short_kwarg_strs[i] = f"{k}={vs}"
+
                 args = ", ".join(kwarg_strs)
-                name = "%s.%s(%s)" % (self._node.name, self._method_name, args)
+                name = f"{self._node.name}.{self._method_name}({args})"
 
                 if short_name is None:
                     short_args = ", ".join(short_kwarg_strs)
-                    short_name = "%s.%s(%s)" % (self._node.short_name,
-                                                self._method_name,
-                                                short_args)
+                    short_name = f"{self._node.short_name}.{self._method_name}({short_args})"
 
             derived_node = self._node_cls(self._node.__call__,
                                           self._node_type_func,
@@ -612,14 +593,15 @@ class MDFCustomNodeDecorator(object):
                                           category,
                                           kwargs)
 
-        node = self.__node_type_cls(_func,
-                                    self.func,
-                                    name=name,
-                                    short_name=short_name,
-                                    category=category,
-                                    filter=filter,
-                                    nodetype_func_kwargs=kwargs)
-        return node
+        return self.__node_type_cls(
+            _func,
+            self.func,
+            name=name,
+            short_name=short_name,
+            category=category,
+            filter=filter,
+            nodetype_func_kwargs=kwargs,
+        )
 
 def nodetype(func=None, cls=MDFCustomNode, method=None):
     """
@@ -759,15 +741,11 @@ class _queuenode(MDFIterator):
             self.queue.append(value)
 
     def next(self):
-        if self.as_list:
-            return list(self.queue)
-        return self.queue
+        return list(self.queue) if self.as_list else self.queue
 
     def send(self, value):
         self.queue.append(value)
-        if self.as_list:
-            return list(self.queue)
-        return self.queue
+        return list(self.queue) if self.as_list else self.queue
 
 # decorators don't work on cythoned classes
 queuenode = nodetype(_queuenode, cls=MDFQueueNode, method="queue")
@@ -1040,13 +1018,12 @@ class _delaynode(MDFIterator):
 
     def send(self, value):
         skip = False
-        if self.skip_nans:
-            if isinstance(value, float):
-                if np.isnan(value):
-                    skip = True
-            elif isinstance(value, np.ndarray):
-                if np.isnan(value).all():
-                    skip = True
+        if isinstance(value, float):
+            if self.skip_nans and np.isnan(value):
+                skip = True
+        elif isinstance(value, np.ndarray):
+            if self.skip_nans and np.isnan(value).all():
+                skip = True
         if not skip:
             self.queue.append(value)
         return self.queue[0]
@@ -1163,14 +1140,10 @@ class _nansumnode(MDFIterator):
         return self.accum_f
 
     def next(self):
-        if self.is_float:
-            return self.accum_f
-        return self.accum.copy()
+        return self.accum_f if self.is_float else self.accum.copy()
 
     def send(self, value):
-        if self.is_float:
-            return self._send_float(value)
-        return self._send_vector(value)
+        return self._send_float(value) if self.is_float else self._send_vector(value)
 
 # decorators don't work on cythoned types
 nansumnode = nodetype(cls=MDFNanSumNode, method="nansum")(_nansumnode)
@@ -1243,26 +1216,21 @@ class _cumprodnode(MDFIterator):
         return self.accum.copy()
 
     def _send_float(self, value):
-        if self.nan_mask_f:
-            if value == value:
-                self.nan_mask_f = False
-                self.accum_f = 1.0
+        if self.nan_mask_f and value == value:
+            self.nan_mask_f = False
+            self.accum_f = 1.0
 
         if not self.skipna \
-        or value == value:
+            or value == value:
             self.accum_f *= value
 
         return self.accum_f
 
     def next(self):
-        if self.is_float:
-            return self.accum_f
-        return self.accum.copy()
+        return self.accum_f if self.is_float else self.accum.copy()
 
     def send(self, value):
-        if self.is_float:
-            return self._send_float(value)
-        return self._send_vector(value)
+        return self._send_float(value) if self.is_float else self._send_vector(value)
 
 # decorators don't work on cythoned types
 cumprodnode = nodetype(cls=MDFCumulativeProductNode, method="cumprod")(_cumprodnode)
@@ -1313,36 +1281,33 @@ class _ffillnode(MDFIterator):
             #
             if not isinstance(value, (pa.Series, np.ndarray)):
                 raise RuntimeError("fillnode expects a float, pa.Series or ndarray") 
-    
-            if initial_value is not None:
-                if isinstance(initial_value, (float, int)):
-                    if isinstance(value, pa.Series):
-                        self.current_value = pa.Series(initial_value,
-                                                       index=value.index,
-                                                       dtype=value.dtype)
-                    else:
-                        self.current_value = np.ndarray(value.shape, dtype=value.dtype)
-                        self.current_value.fill(initial_value) 
-                else:
-                    # this ensures the current_value ends up being the same type
-                    # as value, even if initial_value is another vector type.
-                    self.current_value = value.copy()
-                    self.current_value[:] = initial_value[:]
-            else:
+
+            if initial_value is None:
                 if isinstance(value, pa.Series):
                     self.current_value = pa.Series(np.nan, index=value.index, dtype=value.dtype)
                 else:
                     self.current_value = np.ndarray(value.shape, dtype=value.dtype)
                     self.current_value.fill(np.nan)
 
+            elif isinstance(initial_value, (float, int)):
+                if isinstance(value, pa.Series):
+                    self.current_value = pa.Series(initial_value,
+                                                   index=value.index,
+                                                   dtype=value.dtype)
+                else:
+                    self.current_value = np.ndarray(value.shape, dtype=value.dtype)
+                    self.current_value.fill(initial_value)
+            else:
+                # this ensures the current_value ends up being the same type
+                # as value, even if initial_value is another vector type.
+                self.current_value = value.copy()
+                self.current_value[:] = initial_value[:]
         # update the current value
         if filter_node_value:
             self.send(value)
 
     def next(self):
-        if self.is_float:
-            return self.current_value_f
-        return self.current_value.copy()
+        return self.current_value_f if self.is_float else self.current_value.copy()
 
     def send(self, value):
         if self.is_float:
@@ -1425,9 +1390,7 @@ class _returnsnode(MDFIterator):
             self.send(value)
 
     def next(self):
-        if self.is_float:
-            return self.return_f
-        return self.returns
+        return self.return_f if self.is_float else self.returns
 
     def send(self, value):
         if self.is_float:
@@ -1535,7 +1498,6 @@ class _rowiternode(MDFIterator):
     def _set_data(self, data):
         self._data = data
 
-        self._is_dataframe = False
         self._is_widepanel = False
         self._is_series = False
 
@@ -1543,15 +1505,14 @@ class _rowiternode(MDFIterator):
         # of a dataframe) so restore it to the original value.
         self._missing_value = self._missing_value_orig
 
+        self._is_dataframe = False
         try:
             if isinstance(data, pa.DataFrame):
                 self._is_dataframe = True
 
                 # convert missing value to a row with the same columns as the dataframe
                 if not isinstance(self._missing_value, pa.Series):
-                    dtype = object
-                    if data.index.size > 0:
-                        dtype = data.xs(data.index[0]).dtype
+                    dtype = data.xs(data.index[0]).dtype if data.index.size > 0 else object
                     self._missing_value = pa.Series(self._missing_value,
                                                     index=data.columns,
                                                     dtype=dtype)
@@ -1587,8 +1548,9 @@ class _rowiternode(MDFIterator):
                 clsname = type(data)
                 if hasattr(data, "__class__"):
                     clsname = data.__class__.__name__
-                raise AssertionError("datanode expects a DataFrame, WidePanel or Series; "
-                                     "got '%s'" % clsname)
+                raise AssertionError(
+                    f"datanode expects a DataFrame, WidePanel or Series; got '{clsname}'"
+                )
 
         except StopIteration:
             self._current_index = None
@@ -1601,7 +1563,7 @@ class _rowiternode(MDFIterator):
         # (use the stored index_node_type as the current value may be delayed
         # and therefore be None instead of it usual type)
         self._index_to_date = type(self._current_index) is datetime.date \
-                                and self._index_node_type is datetime.datetime
+                                    and self._index_node_type is datetime.datetime
 
     def send(self, data):
         if data is not self._data:
@@ -1616,14 +1578,12 @@ class _rowiternode(MDFIterator):
             return self._next_dataframe()
         if self._is_widepanel:
             return self._next_widepanel()
-        if self._is_series:
-            return self._next_series()
-        return self._missing_value
+        return self._next_series() if self._is_series else self._missing_value
 
     def _next_dataframe(self):
         i = self._index_node()
         if self._current_index is None \
-        or i is None:
+            or i is None:
             return self._missing_value
 
         if self._index_to_date:
@@ -1637,10 +1597,7 @@ class _rowiternode(MDFIterator):
                 self._current_index = next(self._iter)
                 self._current_value = self._data.xs(self._current_index)
             except StopIteration:
-                if self._ffill:
-                    return self._current_value
-                return self._missing_value
-
+                return self._current_value if self._ffill else self._missing_value
         if self._current_index == i:
             return self._current_value
 
@@ -1652,7 +1609,7 @@ class _rowiternode(MDFIterator):
     def _next_widepanel(self):
         i = self._index_node()
         if self._current_index is None \
-        or i is None:
+            or i is None:
             return self._missing_value
 
         if self._index_to_date:
@@ -1666,10 +1623,7 @@ class _rowiternode(MDFIterator):
                 self._current_index = next(self._iter)
                 self._current_value = self._data.major_xs(self._current_index)
             except StopIteration:
-                if self._ffill:
-                    return self._prev_value
-                return self._missing_value
-
+                return self._prev_value if self._ffill else self._missing_value
         if self._current_index == i:
             return self._current_value
 
@@ -1681,7 +1635,7 @@ class _rowiternode(MDFIterator):
     def _next_series(self):
         i = self._index_node()
         if self._current_index is None \
-        or i is None:
+            or i is None:
             return self._missing_value
 
         if self._index_to_date:
@@ -1693,10 +1647,7 @@ class _rowiternode(MDFIterator):
                 self._prev_value = self._current_value
                 self._current_index, self._current_value = next(self._iter)
             except StopIteration:
-                if self._ffill:
-                    return self._prev_value
-                return self._missing_value
-
+                return self._prev_value if self._ffill else self._missing_value
         if self._current_index == i:
             return self._current_value
 
@@ -1763,18 +1714,19 @@ def datanode(name=None,
     else:
         func = MDFCallable(name, lambda: data)
 
-    node = MDFRowIteratorNode(name=name,
-                              func=func,
-                              node_type_func=_rowiternode,
-                              category=category,
-                              filter=filter,
-                              nodetype_func_kwargs={
-                                "index_node" : index_node,
-                                "delay" : delay,
-                                "missing_value" : missing_value,
-                                "ffill" : ffill,
-                              })
-    return node
+    return MDFRowIteratorNode(
+        name=name,
+        func=func,
+        node_type_func=_rowiternode,
+        category=category,
+        filter=filter,
+        nodetype_func_kwargs={
+            "index_node": index_node,
+            "delay": delay,
+            "missing_value": missing_value,
+            "ffill": ffill,
+        },
+    )
 
 def filternode(name=None,
                data=None,
@@ -1816,17 +1768,18 @@ def filternode(name=None,
     else:
         func = MDFCallable(name, lambda: pa.Series(True, index=data.index))
 
-    node = MDFRowIteratorNode(name=name,
-                              func=MDFCallable(name, func),
-                              node_type_func=_rowiternode,
-                              category=category,
-                              filter=filter,
-                              nodetype_func_kwargs={
-                                "index_node" : index_node,
-                                "missing_value" : False,
-                                "delay" : delay,
-                              })
-    return node
+    return MDFRowIteratorNode(
+        name=name,
+        func=MDFCallable(name, func),
+        node_type_func=_rowiternode,
+        category=category,
+        filter=filter,
+        nodetype_func_kwargs={
+            "index_node": index_node,
+            "missing_value": False,
+            "delay": delay,
+        },
+    )
 
 #
 # applynode is a way of transforming a plain function into an mdf
@@ -1939,11 +1892,12 @@ def _lookaheadnode(value_unused, owner_node, periods, filter_node=None, offset=p
         while count < periods:
             shifted_ctx.set_date(date)
             date += offset
-    
-            if filter_node is not None:
-                if not shifted_ctx.get_value(filter_node):
-                    continue
-    
+
+            if filter_node is not None and not shifted_ctx.get_value(
+                filter_node
+            ):
+                continue
+
             value = shifted_ctx.get_value(owner_node.base_node)
             values.append(value)
             dates.append(shifted_ctx.get_date())
@@ -1976,9 +1930,7 @@ class Op(object):
         return self.__class__(self.op, owner)
 
     def __call__(self, rhs=None):
-        args = ()
-        if rhs is not None:
-            args = (rhs,)
+        args = (rhs, ) if rhs is not None else ()
         return self.lhs.applynode(func=self.op, args=args)
 
 if sys.version_info[0] <= 2:

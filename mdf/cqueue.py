@@ -29,9 +29,7 @@ class cqueue(object):
 
     def __getitem__(self, i):
         i_ = cython.declare(int, i)
-        if i_ < 0:
-            return self._queue[self._end + i_]
-        return self._queue[self._start + i_]
+        return self._queue[self._end + i_] if i_ < 0 else self._queue[self._start + i_]
 
     def push(self, x):
         cqueue_push(self, x)

@@ -182,15 +182,11 @@ def _apply_filters(nodes_and_ctxs, ctx_filter, category_filter):
             seen.add((node, ctx))
 
             shift_set = ctx.get_shift_set()
-            categories = node.categories
             include = True
 
             # check if context is included
             if ctx_filter is not None:
-                if not shift_set:
-                    if None not in ctx_filter:
-                        include = False
-                else:
+                if shift_set:
                     # check if shift set is included
                     for key, value in shift_set.iteritems():
                         if key in ctx_filter and value in ctx_filter[key]:
@@ -198,17 +194,20 @@ def _apply_filters(nodes_and_ctxs, ctx_filter, category_filter):
                     else:
                         include = False
 
+                elif None not in ctx_filter:
+                    include = False
             # check at least one of the node categories is in the filter
             if include and category_filter is not None:
-                if not categories and None not in category_filter:
-                    include = False
-                else:
+                categories = node.categories
+                if categories or None in category_filter:
                     for category in categories:
                         if category in category_filter:
                             break
                         else:
                             include = False
 
+                else:
+                    include = False
             # if both filters passed add it to the list and continue to the next one
             if include:
                 nodes_and_ctxs.append((node, ctx))
@@ -228,9 +227,7 @@ def _ipython_active():
         return False
 
     try:
-        if IPython.__version__ >= "0.12":
-            return __IPYTHON__
-        return __IPYTHON__active
+        return __IPYTHON__ if IPython.__version__ >= "0.12" else __IPYTHON__active
     except NameError:
         return False
 
@@ -248,8 +245,7 @@ def _pydev_attach():
         # look for a PyDev src folder
         program_files = os.environ.get("PROGRAMFILES", r"C:\Program Files (x86)")
         pattern = r"%s\Eclipse\plugins\org.python.pydev.debug_*\pysrc" % program_files
-        folders = sorted(glob.glob(pattern), reverse=True)
-        if folders:
+        if folders := sorted(glob.glob(pattern), reverse=True):
             if folders[0] not in sys.path:
                 sys.path.append(folders[0])
 
@@ -267,9 +263,7 @@ def _pydev_attach():
         sys.stdout = sys._pydev_orig_stdout
         sys.stderr = sys._pydev_orig_stderr
 
-    # stop any existing debugger
-    dbg = pydevd.GetGlobalDebugger()
-    if dbg:
+    if dbg := pydevd.GetGlobalDebugger():
         dbg.FinishDebuggingSession()
         time.sleep(0.1)
         pydevd_tracing.SetTrace(None)
@@ -353,7 +347,7 @@ class MDFViewerFrame(wx.Frame):
             "get_dataframes"    : self.GetDataFrames,
             "show"              : self.AddNodeToRoot,
         }
-        self._pycrust_locals.update(_default_pycrust_locals)
+        self._pycrust_locals |= _default_pycrust_locals
 
         self._last_selected_start_date = datetime.now()
         self._last_selected_end_date = datetime.now()
@@ -606,7 +600,7 @@ class MDFViewerFrame(wx.Frame):
         if self._value_viewer:
             self._value_viewer.SetNode(node, ctx)
             pane = self._mgr.GetPane(self._value_viewer)
-            caption = "Node Value (%s)" % self._value_viewer.GetCurrentValueType()
+            caption = f"Node Value ({self._value_viewer.GetCurrentValueType()})"
             if caption != pane.caption:
                 pane.caption = caption
                 self._mgr.Update()
@@ -1317,7 +1311,7 @@ class MDFViewerFrame(wx.Frame):
                 seen.add((current.node, current.ctx))
 
                 if search_value.lower() in current.node.short_name.lower() \
-                and current.node is not self._root_node:
+                    and current.node is not self._root_node:
                     return current
 
                 # add children to be processed depth first
@@ -1367,7 +1361,7 @@ class MDFViewerFrame(wx.Frame):
         # if we're in the middle of searching start from the next child node
         current_node = starting_node
         if self._last_search_item == starting_item \
-        and search_value.lower() in starting_node.node.short_name.lower():
+            and search_value.lower() in starting_node.node.short_name.lower():
             try:
                 current_node = starting_node.children.next()
             except StopIteration:
@@ -1383,7 +1377,10 @@ class MDFViewerFrame(wx.Frame):
                 current_node = next_node
 
         if not found:
-            wx.MessageBox("No nodes matching '%s' found" % search_value, style=wx.ICON_INFORMATION)
+            wx.MessageBox(
+                f"No nodes matching '{search_value}' found",
+                style=wx.ICON_INFORMATION,
+            )
             return
 
         found_item = expand_node(found)
@@ -1427,9 +1424,7 @@ class MDFViewerFrame(wx.Frame):
         """populates a tree control with all the nodes with values in a context"""
         tree = tree or self._dag_tree
 
-        # clear any previous data
-        prev_data = tree.GetPyData(tree.GetRootItem())
-        if prev_data:
+        if prev_data := tree.GetPyData(tree.GetRootItem()):
             prev_ctx, prev_node = prev_data
             prev_node.clear(prev_ctx)
 
@@ -1543,8 +1538,8 @@ class MDFViewerFrame(wx.Frame):
 
         # clear the root node so it doesn't get pickled
         root_node.clear(root_ctx)
-        
-        self.GetStatusBar().SetStatusText("Saving to %s..." % filename)
+
+        self.GetStatusBar().SetStatusText(f"Saving to {filename}...")
         try:
             # save the context
             root_ctx.save(filename)
@@ -1630,6 +1625,8 @@ def _get_head_nodes(root_ctx):
     returns a list of (context, node) tuples from which all other
     nodes can be reached.
     """
+
+
     class Vertex:
         """vertex in the digraph of (node, ctx) -> (node, ctx)"""
         def __init__(self, node, ctx):
@@ -1640,7 +1637,7 @@ def _get_head_nodes(root_ctx):
             self.__edges_out = set()
 
         @classmethod
-        def add_edge(self, lhs, rhs):
+        def add_edge(cls, lhs, rhs):
             """add directed edge lhs -> rhs"""
             lhs.__edges_out.add((rhs.node, rhs.ctx))
             rhs.__edges_in.add((lhs.node, lhs.ctx))
@@ -1661,7 +1658,7 @@ def _get_head_nodes(root_ctx):
         def out_degree(self):
             return len(self.__edges_out)
 
-        _node_ctx_to_verts = {} 
+        _node_ctx_to_verts = {}
         @classmethod
         def get(cls, node, ctx):
             v = cls._node_ctx_to_verts.get((node, ctx), None)
@@ -1673,6 +1670,7 @@ def _get_head_nodes(root_ctx):
         @classmethod
         def all_vertices(cls):
             return cls._node_ctx_to_verts.values()
+
 
     #
     # build the set of vertices
@@ -1701,7 +1699,7 @@ def _get_head_nodes(root_ctx):
         # be considered and the set of previously found
         # best nodes
         edges_out = list(v.edges_out)
-        seen = set([v])
+        seen = {v}
         while edges_out:
             e = edges_out.pop()
             if e in seen:

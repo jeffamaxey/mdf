@@ -88,7 +88,7 @@ class NodeProperties(wx.Panel):
                 if hasattr(value, "__class__"):
                     valuetype = getattr(value.__class__, "__name__", repr(value.__class__))
             self.valuetype.SetLabel(valuetype or "?")
-    
+
             try:
                 # get the module and line number using inspect
                 path = inspect.getsourcefile(node.func)
@@ -103,7 +103,7 @@ class NodeProperties(wx.Panel):
                         self.path.SetLabel(module.__file__)
                 except (ImportError, AttributeError):
                     pass
-    
+
             # show the shift set if there is one
             shift_set = ctx.get_shift_set()
             self.ctx_grid_sizer.Clear(True)
@@ -126,12 +126,12 @@ class NodeProperties(wx.Panel):
                         shift_value = shift_value.split("\n", 1)[0] + "..."
 
                     if len(shift_value) > 100:
-                        shift_value = shift_value[:100] + "..."
+                        shift_value = f"{shift_value[:100]}..."
 
                     # add a row to the grid
                     self.ctx_grid_sizer.Add(wx.StaticText(self, label=n.short_name), (i, 0))
                     self.ctx_grid_sizer.Add(wx.StaticText(self, label="="), (i, 1))
-                    self.ctx_grid_sizer.Add(wx.StaticText(self, label=str(shift_value)), (i, 2))
+                    self.ctx_grid_sizer.Add(wx.StaticText(self, label=shift_value), (i, 2))
             else:
                 self.ctx_title.SetLabel("")
 

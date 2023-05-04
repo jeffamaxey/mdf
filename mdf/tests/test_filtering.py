@@ -69,15 +69,12 @@ cumprod_df_filtered_expected = df[filter].cumprod().reindex(index).ffill()
 def _normalize(x):
     """try and get a vector/dataframe in a format unittest can compare them"""
     if isinstance(x, float):
-        if np.isnan(x):
-            return -np.inf
-        return x
-
+        return -np.inf if np.isnan(x) else x
     if isinstance(x, (pa.DataFrame, pa.Series)):
         x = x.values
 
     if x.ndim == 1:
-        return tuple([_normalize(y) for y in x])
+        return tuple(_normalize(y) for y in x)
 
     r = x.copy()
     r[np.isnan(r)] = -np.inf

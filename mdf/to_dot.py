@@ -172,7 +172,7 @@ def _to_dot(ctx,
 
             edges.add(edge)
             root.add_edge(edge)
-            
+
     def _escape_node_label(label):
         """
         due to a bug in pydot single quotes are not escaped correctly causing pydot to fail. We can have single quotes 
@@ -208,24 +208,24 @@ def _to_dot(ctx,
         seen = set()
         while dependencies:
             (calling_node, calling_ctx), (called_node, called_ctx), depth = dependencies.pop(0)
-    
+
             if (calling_node, calling_ctx, called_node, called_ctx) in seen:
                 continue
             seen.add((calling_node, calling_ctx, called_node, called_ctx))
-    
+
             # get the graph nodes
             called_graph_node = _get_node(called_ctx, called_node, depth)
             if called_graph_node is None:
                 continue
-    
+
             calling_graph_node = None
             if calling_node is not None and calling_ctx is not None:
                 calling_graph_node = _get_node(calling_ctx, calling_node, depth)
-    
+
             # add the edge between the nodes
             if calling_graph_node is not None:
                 _add_edge(calling_graph_node, called_graph_node, called_ctx, called_node)
-    
+
             # add any dependencies of the called node
             deps = called_node.get_dependencies(called_ctx)
             for node, ctx in deps:
@@ -239,7 +239,7 @@ def _to_dot(ctx,
             unused, ext = os.path.splitext(filename)
             if ext != ".dot":
                 ext = ext.strip(".")
-                write_method = getattr(root, "write_%s" % ext, write_method)
+                write_method = getattr(root, f"write_{ext}", write_method)
         write_method(filename)
 
     return root

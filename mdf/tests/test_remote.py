@@ -22,11 +22,7 @@ class RemoteTest(unittest.TestCase):
         self.ctx = MDFContext()
 
     def test_multiprocess_run(self):
-        # create a few shifts
-        shifts = []
-        for i in range(10):
-            shifts.append({A: i, B: i * 2})
-
+        shifts = [{A: i, B: i * 2} for i in range(10)]
         date_range = pd.bdate_range(datetime(1970, 1, 1), periods=5)
         df_builder = DataFrameBuilder([X])
         num_processes = 4
@@ -42,7 +38,7 @@ class RemoteTest(unittest.TestCase):
 
         # do the same thing in a single process
         sync_df_builder = DataFrameBuilder([X])
-        
+
         sync_start_time = time.clock()
         sync_shifted_ctxs = run(date_range, [sync_df_builder], shifts=shifts, ctx=self.ctx)
         sync_end_time = time.clock()

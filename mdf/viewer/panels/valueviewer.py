@@ -22,9 +22,8 @@ except ImportError:
 
 def _get_panel_cls(value):
     """return the class best suited for displaying 'value'"""
-    if _pandas_available:
-        if isinstance(value, (pa.DataFrame, pa.Series)):
-            return DataFramePanel
+    if _pandas_available and isinstance(value, (pa.DataFrame, pa.Series)):
+        return DataFramePanel
     if isinstance(value, dict):
         return DictPanel
     elif isinstance(value, (list, tuple, deque)):
@@ -141,8 +140,10 @@ class DataFramePanel(wx.grid.Grid, GridCopyMixin):
             self.df = df.convert_objects()
 
             self.datatypes = []
-            for dtype in df.dtypes:
-                self.datatypes.append(self._dtypes.get(dtype, wx.grid.GRID_VALUE_STRING))
+            self.datatypes.extend(
+                self._dtypes.get(dtype, wx.grid.GRID_VALUE_STRING)
+                for dtype in df.dtypes
+            )
 
         def GetNumberRows(self):
             return self.df.index.size
@@ -312,11 +313,10 @@ class DictPanel(wx.lib.scrolledpanel.ScrolledPanel):
         self.SetupScrolling()
 
     def SetValue(self, value):
-        has_complex_type = False
-        for v in value.itervalues():
-            if not isinstance(v, (basestring, int, float, bool, datetime, date)):
-                has_complex_type = True
-
+        has_complex_type = any(
+            not isinstance(v, (basestring, int, float, bool, datetime, date))
+            for v in value.itervalues()
+        )
         if not has_complex_type:
             # put the values in a simple grid
             if self.simple_grid is None:
@@ -382,12 +382,12 @@ class DictTreeCtrl(wx.lib.agw.customtreectrl.CustomTreeCtrl):
 
         for k, v in zip(keys, values):
             if isinstance(k, MDFNode):
-                node_label = "%s (node):" % k.short_name 
+                node_label = f"{k.short_name} (node):"
             else:
-                node_label = "%s (%s):" % (k, _get_type_name(v))
+                node_label = f"{k} ({_get_type_name(v)}):"
 
             if isinstance(v, MDFNode):
-                self.AppendItem(root, "%s %s (node)" % (node_label, v.short_name))
+                self.AppendItem(root, f"{node_label} {v.short_name} (node)")
                 continue
 
             if isinstance(v, dict):
@@ -402,22 +402,22 @@ class DictTreeCtrl(wx.lib.agw.customtreectrl.CustomTreeCtrl):
                 continue
 
             if isinstance(v, (int, basestring)):
-                self.AppendItem(root, "%s %s" % (node_label, v))
+                self.AppendItem(root, f"{node_label} {v}")
                 continue
 
             if isinstance(v, (int, float)):
-                self.AppendItem(root, "%s %s" % (node_label, _default_float_format % v))
+                self.AppendItem(root, f"{node_label} {_default_float_format % v}")
                 continue
 
             cls = _get_panel_cls(v)
             if issubclass(cls, wx.StaticText):
-                self.AppendItem(root, "%s %s" % (node_label, v))
+                self.AppendItem(root, f"{node_label} {v}")
                 continue
 
             # create a control to display this value and add it to the tree
             ctrl = cls(self)
             ctrl.SetValue(v)
-            
+
             if isinstance(ctrl, wx.grid.Grid):
                 # expand the grid to its full size
                 ctrl.ForceRefresh()
@@ -457,17 +457,13 @@ class NpArrayPanel(wx.grid.Grid, GridCopyMixin):
             return self.array.shape[0]
 
         def GetNumberCols(self):
-            if len(self.array.shape) > 1:
-                return self.array.shape[1]
-            return 1
+            return self.array.shape[1] if len(self.array.shape) > 1 else 1
 
         def IsEmptyCell(self, row, col):
             return False
 
         def GetValue(self, row, col):
-            if len(self.array.shape) > 1:
-                return self.array[row, col]
-            return self.array[row]
+            return self.array[row, col] if len(self.array.shape) > 1 else self.array[row]
 
         def GetColLabelValue(self, col):
             return str(col)

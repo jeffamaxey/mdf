@@ -39,7 +39,7 @@ def _get_labels(node, label=None, value=None):
 
             # otherwise create a list using the value's index
             if isinstance(value, pa.Series):
-                return ["%s.%s" % (label, c) for c in value.index]
+                return [f"{label}.{c}" for c in value.index]
             return ["%s.%d" % (label, i) for i in xrange(len(value))]
 
         # if value is not a list return a single label
@@ -99,7 +99,7 @@ def _relabel(columns, node_names, short_names, ctx_ids):
         unique_short_names = np.unique(short_names)
         if unique_short_names.size == len(short_names):
             for i, j, node_name, short_name, ctx_id in details:
-                columns[i][j] = "%s.%s" % (col, short_name)
+                columns[i][j] = f"{col}.{short_name}"
             continue
 
         # otherwise try prefixing with the full names
@@ -112,14 +112,14 @@ def _relabel(columns, node_names, short_names, ctx_ids):
                     columns[i][j] = col.replace(short_name, node_name)
             else:
                 for i, j, node_name, short_name, ctx_id in details:
-                    columns[i][j] = "%s.%s" % (col, node_name)
+                    columns[i][j] = f"{col}.{node_name}"
             continue
 
         # otherwise if the contexts are unique use a context id suffix
         unique_ctx_ids = np.unique(ctx_ids)
         if unique_ctx_ids.size == len(ctx_ids):
             for i, j, node_name, short_name, ctx_id in details:
-                columns[i][j] = "%s.ctx-%s" % (col, ctx_id)
+                columns[i][j] = f"{col}.ctx-{ctx_id}"
             continue
 
         # If none of those are unique use a numeric suffix.
@@ -232,7 +232,7 @@ class CSVWriter(object):
                 elif isinstance(value, pa.Series):
                     self.handlers.append(self._write_series)
                 else:
-                    raise Exception("Unhandled type %s for node %s" % (type(value), node))
+                    raise Exception(f"Unhandled type {type(value)} for node {node}")
 
             # write the header
             writer.writerow(header)
@@ -262,7 +262,7 @@ class NodeTypeHandler(object):
         self._filter = node.get_filter() if filter and isinstance(node, MDFEvalNode) else None
         self._index = []
         self._labels = set()
-        self._data = dict()
+        self._data = {}
 
     def handle(self, date, ctx, value):
         """
@@ -395,10 +395,19 @@ class DataFrameBuilder(object):
 
             key = (node.name, node.short_name, ctx_.get_id())
             handler = handler_dict.get(key)
-            
+
             if not handler:
-                if isinstance(node_value, (basestring, int, float, bool, datetime.date)) \
-                or isinstance(node_value, tuple(np.typeDict.values())):
+                if isinstance(
+                    node_value,
+                    (
+                        basestring,
+                        int,
+                        float,
+                        bool,
+                        datetime.date,
+                        tuple(np.typeDict.values()),
+                    ),
+                ):
                     handler = NodeBaseTypeHandler(node, filter=self.filter)
                 elif isinstance(node_value, dict):
                     handler = NodeDictTypeHandler(node, filter=self.filter)
@@ -407,7 +416,7 @@ class DataFrameBuilder(object):
                 elif isinstance(node_value, (list, tuple, deque, np.ndarray, pa.Index, pa.core.generic.NDFrame)):
                     handler = NodeListTypeHandler(node, filter=self.filter)
                 else:
-                    raise Exception("Unhandled type %s for node %s" % (type(node_value), node))
+                    raise Exception(f"Unhandled type {type(node_value)} for node {node}")
 
                 handler_dict[key] = handler
 
@@ -625,10 +634,7 @@ class FinalValueCollector(object):
     def get_dict(self, ctx=None):
         """returns the collected values as a dict keyed by the nodes"""
         values = self.get_values(ctx)
-        if values is None:
-            return None
-
-        return dict(zip(self.__nodes, values))
+        return None if values is None else dict(zip(self.__nodes, values))
 
     @property
     def values(self):

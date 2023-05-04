@@ -59,8 +59,8 @@ class ShiftedResultsTuple(Sequence):
             self.__setattr__(k, v)
 
         self.__items = fdict.values()
-        itemstext = ', '.join('%s=%s' % (name, value) for name, value in fdict.items())
-        self.__reprtext = type(self).__name__ + ("(%s)" % itemstext)
+        itemstext = ', '.join(f'{name}={value}' for name, value in fdict.items())
+        self.__reprtext = type(self).__name__ + f"({itemstext})"
 
     def __len__(self):
         return len(self.__items)
@@ -289,18 +289,18 @@ class MDFMagics(Magics):
         args = list(zip(arg_names, args))
 
         start = None
-        if len(args) > 0:
+        if args:
             arg_name, arg = args.pop(0)
             start = _parse_datetime(arg_name, self.shell.user_global_ns, self.shell.user_ns)
 
         end = None
-        if len(args) > 0:
+        if args:
             arg_name, arg = args.pop(0)
             end = _parse_datetime(arg_name, self.shell.user_global_ns, self.shell.user_ns)
 
         # the final argument can be the number of processes to use
         num_processes = 0
-        if len(args) > 0:
+        if args:
             arg_name, arg = args[-1]
             if isinstance(arg, basestring) and arg.startswith("||"):
                 arg_name, arg = args.pop()
@@ -311,11 +311,10 @@ class MDFMagics(Magics):
         has_shifts = False
         shift_sets = [{}] # always have at least one empty shift set
         shift_names = ["_0"]
-        arg_name, arg = args[-1] if len(args) > 0 else (None, None)
+        arg_name, arg = args[-1] if args else (None, None)
         if not isinstance(arg, MDFNode):
             arg_name, arg = args.pop()
-            named_shift_sets = _get_shift_sets(arg_name, arg)
-            if named_shift_sets:
+            if named_shift_sets := _get_shift_sets(arg_name, arg):
                 shift_names, shift_sets = zip(*named_shift_sets)
                 has_shifts = True
 
@@ -323,36 +322,33 @@ class MDFMagics(Magics):
         nodes = []
         node_var_names = []
         for arg_name, node in args:
-            assert isinstance(node, MDFNode), "%s is not a node" % arg_name
+            assert isinstance(node, MDFNode), f"{arg_name} is not a node"
             nodes.append(node)
             node_var_names.append(arg_name)
 
         curr_ctx = _get_current_context()
         ctxs = [None] * len(nodes)
 
-        if not nodes:
-            # get the selected nodes from the viewer
-            if _viewer_imported:
-                selected = viewer.get_selected()
-                ctxs, nodes = zip(*selected)
-                for i, (ctx, node) in enumerate(selected):
-                    assert ctx.is_shift_of(curr_ctx), \
-                        "selected node '%s' is not in the current context" % node.name
+        if not nodes and _viewer_imported:
+            selected = viewer.get_selected()
+            ctxs, nodes = zip(*selected)
+            for i, (ctx, node) in enumerate(selected):
+                assert ctx.is_shift_of(
+                    curr_ctx
+                ), f"selected node '{node.name}' is not in the current context"
 
-                    # replace any contexts that are simply the current context with None
-                    # so that shifting works correctly
-                    if ctx is curr_ctx:
-                        ctxs[i] = None
+                # replace any contexts that are simply the current context with None
+                # so that shifting works correctly
+                if ctx is curr_ctx:
+                    ctxs[i] = None
 
         # if there are shifts then all the contexts have to be None otherwise the
         # shifts won't work correctly. This could be relaxed later if it causes problems,
         # but for now this makes the code simpler.
         if has_shifts:
             assert np.array([x is None for x in ctxs]).all(), \
-                "Can't apply shifts when contexts are explicitly specified"
+                    "Can't apply shifts when contexts are explicitly specified"
 
-        # list df_builders, one per node or group of nodes
-        callbacks = []
         df_builders = []
         if widepanel or not single_df:
             # build multiple dataframes
@@ -370,9 +366,7 @@ class MDFMagics(Magics):
                 df_builder = DataFrameBuilder(nodes, contexts=ctxs, filter=True)
             df_builders.append(df_builder)
 
-        # add all the dataframe builders to the callbacks
-        callbacks.extend(df_builders)
-
+        callbacks = list(df_builders)
         root_ctx = curr_ctx.get_parent() or curr_ctx
         date_range = pd.DatetimeIndex(start=start, end=end, freq=self.__timestep)
 
@@ -388,29 +382,23 @@ class MDFMagics(Magics):
         if not has_shifts:
             shifted_ctxs = [root_ctx]
 
-        # when returning a list of results because multiple shifts have been specified
-        # use a named tuple with the items being the names of the shifts
-        tuple_ctr = tuple
-        if has_shifts:
-            # Currying hell yeah
-            tuple_ctr = partial(ShiftedResultsTuple, shift_names)
-
+        tuple_ctr = partial(ShiftedResultsTuple, shift_names) if has_shifts else tuple
         if widepanel:
             wps = []
             for shift_name, shift_set, shifted_ctx in zip(shift_names, shift_sets, shifted_ctxs):
-                wp_dict = {}
-                for node_var_name, df_builder in zip(node_var_names, df_builders):
-                    wp_dict[node_var_name] = df_builder.get_dataframe(shifted_ctx)
+                wp_dict = {
+                    node_var_name: df_builder.get_dataframe(shifted_ctx)
+                    for node_var_name, df_builder in zip(
+                        node_var_names, df_builders
+                    )
+                }
                 wp = pd.WidePanel.from_dict(wp_dict)
 
                 if has_shifts:
                     wp = WidePanelWithShiftSet(wp, shift_name, shift_set)
                 wps.append(wp)
 
-            if len(wps) == 1:
-                return wps[0]
-            return tuple_ctr(*wps)
-
+            return wps[0] if len(wps) == 1 else tuple_ctr(*wps)
         # list a list of lists of dataframes
         # [[dfs for one shift set], [dfs for next shift set], ...]
         df_lists = []
@@ -426,13 +414,8 @@ class MDFMagics(Magics):
         if single_df:
             # flatten into a single list (there should be one dataframe per shift)
             dfs = reduce(operator.add, df_lists, [])
-            if len(dfs) == 1:
-                return dfs[0]
-            return tuple_ctr(*dfs)
-
-        if len(df_lists) == 1:
-            return df_lists[0]
-        return tuple_ctr(*df_lists)
+            return dfs[0] if len(dfs) == 1 else tuple_ctr(*dfs)
+        return df_lists[0] if len(df_lists) == 1 else tuple_ctr(*df_lists)
 
     @line_magic
     def mdf_df(self, parameter_s=""):
@@ -491,7 +474,7 @@ class MDFMagics(Magics):
 
         dfs = []
         # if there is at least one DataFrame at the beginning, export them directly
-        if args and isinstance(args[0], pd.DataFrame):
+        if isinstance(args[0], pd.DataFrame):
             dfs.extend((x for x in args if isinstance(x, pd.DataFrame)))
 
         else:
@@ -501,9 +484,7 @@ class MDFMagics(Magics):
         excel.export_dataframe(dfs)
 
         # return the DataFrame if there is only 1, the complete list otherwise. can be [].
-        if len(dfs) == 1:
-            return dfs[0]
-        return dfs
+        return dfs[0] if len(dfs) == 1 else dfs
 
     @line_magic
     def mdf_plot(self, parameter_s=""):
@@ -542,15 +523,15 @@ class MDFMagics(Magics):
 
         for node in nodes:
             if not (node.has_value(curr_ctx) or node.was_called(curr_ctx)):
-                _log.warn("%s has not yet been evaluated" % node.name)
+                _log.warn(f"{node.name} has not yet been evaluated")
 
         # get all the varnode values
         varnode_values = {}
 
         def vistor(node, ctx):
             if isinstance(node, MDFVarNode) \
-                and ctx is curr_ctx \
-                and node is not now:
+                    and ctx is curr_ctx \
+                    and node is not now:
                 varnode_values[node] = ctx[node]
             return True
 
@@ -563,7 +544,9 @@ class MDFMagics(Magics):
         df = pd.DataFrame(data={}, index=nodes, columns=["Value", "Category"], dtype=object)
         for node, value in varnode_values.items():
             df["Value"][node] = value
-            df["Category"][node] = ",".join(["%s" % (c or "") for c in sorted(node.categories)])
+            df["Category"][node] = ",".join(
+                [f'{c or ""}' for c in sorted(node.categories)]
+            )
 
         if df.index.size == 0:
             print ("No matching dependencies found - has the node been evaluated?")
@@ -590,7 +573,9 @@ def _parse_datetime(arg, global_ns={}, local_ns={}):
     except NameError:
         pass
 
-    raise TypeError("Supplied parameter value '%s' can not be converted to datetime." % arg)
+    raise TypeError(
+        f"Supplied parameter value '{arg}' can not be converted to datetime."
+    )
 
 
 def mdf_pylab_help():
@@ -715,7 +700,7 @@ def _get_shift_sets(arg_name, shifts):
     shift sets: (name, shift_dict)
     """
     if not isinstance(shifts, (dict, tuple, list)):
-        raise Exception("Couldn't convert %s to a shift set" % arg_name)
+        raise Exception(f"Couldn't convert {arg_name} to a shift set")
 
     shift_sets = []
 
@@ -740,7 +725,6 @@ def _get_shift_sets(arg_name, shifts):
                 shift_name = "_%d" % len(shift_sets)
             shift_sets.append((shift_name, shift))
 
-        # but we also allow lists of lists of dicts
         elif isinstance(shift, (list, tuple)):
             for i, x in enumerate(shift):
                 inner_shift_name = shift_name
@@ -756,12 +740,12 @@ def _get_shift_sets(arg_name, shifts):
 
                 shift_sets.append((inner_shift_name, x))
 
-        # anything else we can't deal with
         else:
             if shift_name is None:
                 shift_name = "_%d" % len(shift_sets)
-            raise AssertionError("shift %s was expected to be a dict, but it's a %s (%s)" % (
-                shift_name, type(shift), shift))
+            raise AssertionError(
+                f"shift {shift_name} was expected to be a dict, but it's a {type(shift)} ({shift})"
+            )
 
     return shift_sets
 
@@ -776,9 +760,7 @@ def _ipython_active():
         return False
 
     try:
-        if IPython.__version__ >= "0.12":
-            return __IPYTHON__
-        return __IPYTHON__active
+        return __IPYTHON__ if IPython.__version__ >= "0.12" else __IPYTHON__active
     except NameError:
         return False
 

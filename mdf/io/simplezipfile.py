@@ -17,13 +17,13 @@ class SimpleZipFile(object):
     def __init__(self, filename, inner_filename=None, mode="w",
                     compression=ZIP_DEFLATED, allowZip64=False):
         mode = mode.rstrip("+b")
-        assert mode in ("r", "w"), "unsupported mode '%s'" % mode
+        assert mode in ("r", "w"), f"unsupported mode '{mode}'"
         self.__mode = mode
         self.__filename = filename
         self.__inner_filename = inner_filename
         self.__compression = compression
         self.__allow_zip_64 = allowZip64
-        
+
         # keep a reference to unlink as during shutdown the os module may be
         # discarded before this object is
         self.__unlink = os.unlink
@@ -46,7 +46,7 @@ class SimpleZipFile(object):
                     self._fh.write(zip_fh.read(inner_filename))
                 else:
                     infos = zip_fh.infolist()
-                    assert len(infos) == 1, "Multiple entries found (%s)" % infos
+                    assert len(infos) == 1, f"Multiple entries found ({infos})"
                     self._fh.write(zip_fh.read(infos[0]))
 
                 # seek self back to the start of the file for reading
@@ -77,9 +77,9 @@ class SimpleZipFile(object):
                 inner_filename = self.__inner_filename
                 if not inner_filename:
                     base, ext = os.path.splitext(self.__filename)
-                    inner_filename = os.path.basename(base) + ".txt"
+                    inner_filename = f"{os.path.basename(base)}.txt"
 
-                _log.debug("Compressing %s" % (self.__filename))
+                _log.debug(f"Compressing {self.__filename}")
                 zip_fh = ZipFile(self.__filename, "w", self.__compression)
                 try:
                     zip_fh.write(tmp_filename, inner_filename)

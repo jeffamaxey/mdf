@@ -71,10 +71,7 @@ class StringValidator(wx.PyValidator):
     def Validate(self, win):
         tc = self.GetWindow()
         val = tc.GetValue()
-        for x in val:
-            if x not in self.allowed_chars:
-                return False
-        return True
+        return all(x in self.allowed_chars for x in val)
 
     def OnChar(self, event):
         key = event.GetKeyCode()
@@ -210,6 +207,7 @@ class FiltersDialog(wx.Dialog):
                 if category is not None:
                     categories.add(category)
             return True
+
         root_ctx.visit_nodes(collect_categories)
 
         # list control for category filters
@@ -251,10 +249,7 @@ class FiltersDialog(wx.Dialog):
             # add the individual shift items
             num_checked = 0
             for shift in sorted(all_shifts[key]):
-                if isinstance(shift, MDFNode):
-                    shift_str = shift.short_name
-                else:
-                    shift_str = str(shift)[:50]
+                shift_str = shift.short_name if isinstance(shift, MDFNode) else str(shift)[:50]
                 shift_item = tree_ctrl.AppendItem(node_item, shift_str, ct_type=1)
                 shift_item.SetData((key, shift, False))
 
@@ -350,10 +345,10 @@ class FiltersDialog(wx.Dialog):
 
     def IsCategoryFiltered(self):
         """return true if category filters should be applied"""
-        for i in xrange(self.categories_listbox.GetCount()):
-            if not self.categories_listbox.IsChecked(i):
-                return True
-        return False
+        return any(
+            not self.categories_listbox.IsChecked(i)
+            for i in xrange(self.categories_listbox.GetCount())
+        )
         
     def GetCategoryFilter(self):
         """
@@ -370,12 +365,11 @@ class FiltersDialog(wx.Dialog):
 
     def OnCtxTreeItemChecked(self, event):
         item = event.GetItem()
-        
+
         # if the user has set the check box to undetermined set it to unchecked
-        if item.Is3State():
-            if item.Get3StateValue() == wx.CHK_UNDETERMINED:
-                item.Set3StateValue(wx.CHK_UNCHECKED)
-                item.Check(False)
+        if item.Is3State() and item.Get3StateValue() == wx.CHK_UNDETERMINED:
+            item.Set3StateValue(wx.CHK_UNCHECKED)
+            item.Check(False)
 
         checked = item.IsChecked()
         node, value, cascade = item.GetData()

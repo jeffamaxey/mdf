@@ -22,12 +22,12 @@ def _to_range(row, col, sheet=None):
     """returns an Excel range string, e.g. 0, 0 => A1"""
     cell = ""
     while col >= 26:
-        cell = "%s%s" % (chr(ord("A") + (col % 26)), cell)
+        cell = f'{chr(ord("A") + col % 26)}{cell}'
         col = (col // 26) - 1
-    cell = "%s%s" % (chr(ord("A") + (col % 26)), cell) 
+    cell = f'{chr(ord("A") + col % 26)}{cell}'
     cell += "%d" % (row + 1)
     if sheet is not None:
-        cell = "%s!%s" % (sheet.name, cell)
+        cell = f"{sheet.name}!{cell}"
     return cell
 
 class Differ(object):
@@ -112,7 +112,7 @@ class DataFrameDiffer(DataFrameBuilder, Differ):
                         pass
 
                 if not components or not module:
-                    raise Exception("Node not found: '%s'" % name)
+                    raise Exception(f"Node not found: '{name}'")
 
                 # get the class and then the node from the module
                 obj = module
@@ -123,7 +123,7 @@ class DataFrameDiffer(DataFrameBuilder, Differ):
 
             # check by this point we have a node
             if not isinstance(n, MDFNode):
-                raise Exception("Node not found: %s" % n)
+                raise Exception(f"Node not found: {n}")
 
             nodes.append(n)
 
@@ -187,10 +187,13 @@ class DataFrameDiffer(DataFrameBuilder, Differ):
         # Coerce python datetime indexes to pandas DatetimeIndex
         # TODO: Remove this once pandas 0.7.3 compatibility is no longer needed
         def _coerce_dt_index(index):
-            if len(index) > 0 and (not isinstance(index, pa.DatetimeIndex)):
-                # If first and last index entries are python datetimes, assume that the index contains only datetimes
-                if isinstance(index[0], datetime) and isinstance(index[-1], datetime):
-                    return pa.DatetimeIndex(index)
+            if (
+                len(index) > 0
+                and (not isinstance(index, pa.DatetimeIndex))
+                and isinstance(index[0], datetime)
+                and isinstance(index[-1], datetime)
+            ):
+                return pa.DatetimeIndex(index)
 
             # Return the original index if no modifications were done
             return index
@@ -219,10 +222,10 @@ class DataFrameDiffer(DataFrameBuilder, Differ):
 
             # check the columns are the same
             if len(lhs_columns) != len(rhs_columns) \
-            or (np.array(lhs_columns) != np.array(rhs_columns)).any():
+                or (np.array(lhs_columns) != np.array(rhs_columns)).any():
                 is_different = True
 
-                description = "%s has column differences" % node.name
+                description = f"{node.name} has column differences"
                 description += "\n" + "-" * len(description) + "\n\n"
 
                 max_columns = max(len(lhs_columns), len(rhs_columns))
@@ -255,11 +258,9 @@ class DataFrameDiffer(DataFrameBuilder, Differ):
                 lhs_diff_dates = lhs_data.index[mask]
                 rhs_diff_dates = rhs_data.index[mask]
 
-                description = "%s has index differences" % node.name
+                description = f"{node.name} has index differences"
                 description += "\n" + "-" * len(description) + "\n\n"
-                description += "indexes are different starting at %s != %s" % (
-                                            lhs_diff_dates[0],
-                                            rhs_diff_dates[0])
+                description += f"indexes are different starting at {lhs_diff_dates[0]} != {rhs_diff_dates[0]}"
 
                 long_description += description + "\n\n"
                 continue
@@ -309,8 +310,9 @@ class DataFrameDiffer(DataFrameBuilder, Differ):
                 description = "%s has %d differences" % (node.name, len(diffs.index))
                 description += "\n" + "-" * len(description) + "\n\n"
                 description += "tolerance = %f%s\n\n" % (
-                                    tolerance if is_abs else tolerance * 100.0,
-                                    "%" if not is_abs else "")
+                    tolerance if is_abs else tolerance * 100.0,
+                    "" if is_abs else "%",
+                )
 
                 lhs_diffs = lhs_df[row_mask]
                 rhs_diffs = rhs_df[row_mask]
@@ -322,13 +324,13 @@ class DataFrameDiffer(DataFrameBuilder, Differ):
                 # pad so they're the same length
                 lhs_lines += ["" * max(len(rhs_lines) - len(lhs_lines), 0)]
                 rhs_lines += ["" * max(len(lhs_lines) - len(rhs_lines), 0)]
-                
+
                 max_lines = 10
                 mid = min(len(lhs_lines), max_lines) // 2
 
                 # format them on the same lines
                 lines = []
-                fmt = "%%-%ds     %%-2s     %%s" % max([len(x) for x in lhs_lines])
+                fmt = "%%-%ds     %%-2s     %%s" % max(len(x) for x in lhs_lines)
                 for i, (l, r) in enumerate(zip(lhs_lines, rhs_lines)):
                     if i == mid:
                         lines.append(fmt % (l, "!=", r))
@@ -343,19 +345,19 @@ class DataFrameDiffer(DataFrameBuilder, Differ):
 
         if is_different:
             node_names = [x.short_name for x in different_nodes]
-            _log.debug("Differences found in nodes: %s" % ", ".join(node_names))
+            _log.debug(f'Differences found in nodes: {", ".join(node_names)}')
 
-            if len(different_nodes) == 0:
+            if not different_nodes:
                 brief_description = "No data differences"
                 long_description += "No data differences\n\n"
             elif len(different_nodes) == 1:
-                brief_description = "%s has differences" % node_names[0]
+                brief_description = f"{node_names[0]} has differences"
             else:
                 brief_description = ", ".join(node_names[:-1])
-                brief_description += " and %s have differences" % node_names[-1] 
+                brief_description += f" and {node_names[-1]} have differences" 
 
-            if self.__xls_filename and len(different_nodes) > 0:
-                _log.debug("Writing differences to Excel file '%s'" % self.__xls_filename)
+            if self.__xls_filename and different_nodes:
+                _log.debug(f"Writing differences to Excel file '{self.__xls_filename}'")
                 details_filename = self.__xls_filename
                 self.__write_xls(other, different_nodes, lhs_data, rhs_data, details_filename, ctx, other_ctx)
 
@@ -376,62 +378,68 @@ class DataFrameDiffer(DataFrameBuilder, Differ):
 
             if len(lhs_df.columns) > 255 or len(rhs_df.columns) > 255: # xlwt has a limit of 256 columns
                 # just dump data into two separate CSV if its too big for a nice XLS report
-                fname = "%s__%s" % (node.short_name, os.path.splitext(os.path.basename(filename))[0])
+                fname = f"{node.short_name}__{os.path.splitext(os.path.basename(filename))[0]}"
                 csv_fpath =  os.path.join(os.path.dirname(filename), fname)
-                                      
+
                 _log.info("Node %s has mare than 255 columns, can't use xlwt, writing CSV to "
                           "%s[_LHS|_RHS].csv" % (node.name, csv_fpath))
                 lhs_df.to_csv(csv_fpath+"_LHS.csv")
                 rhs_df.to_csv(csv_fpath+"_RHS.csv")
             else:    
-                _log.info("Writing Excel sheet for %s" % node.name)
+                _log.info(f"Writing Excel sheet for {node.name}")
                 nsheets += 1
-                diffs_ws = wb.add_sheet(("%s_DIFFS" % node.short_name)[-31:])
-                lhs_ws = wb.add_sheet(("%s_LHS" % node.short_name)[-31:])
-                rhs_ws = wb.add_sheet(("%s_RHS" % node.short_name)[-31:])
-    
+                diffs_ws = wb.add_sheet(f"{node.short_name}_DIFFS"[-31:])
+                lhs_ws = wb.add_sheet(f"{node.short_name}_LHS"[-31:])
+                rhs_ws = wb.add_sheet(f"{node.short_name}_RHS"[-31:])
+
                 for ws, df in ((lhs_ws, lhs_df), (rhs_ws, rhs_df)):
                     for row, value in enumerate(df.index):
                         ws.write(row + 1, 0, value, date_style)
-    
+
                     for col_i, col_name in enumerate(df.columns):
                         ws.write(0, col_i + 1, str(col_name))
-    
+
                         col = df[col_name]
                         for row_i, value in enumerate(col):
                             if np.isnan(value):
                                 ws.row(row_i + 1).set_cell_error(col_i + 1, "#NUM!")
                             else:
                                 ws.write(row_i + 1, col_i + 1, value)
-    
+
                 max_cols = max(len(lhs_columns), len(rhs_columns))
                 max_rows = max(len(lhs_df.index), len(rhs_df.index))
                 tolerance, is_abs = self.get_tolerance(node)
-    
+
                 for row, value in enumerate(lhs_df.index):
                     diffs_ws.write(row + 1, 0,
                         xlwt.Formula("IF(EXACT(%(l)s,%(r)s),%(l)s,\"ERROR\")" % {
                                         "l" : _to_range(row + 1, 0, lhs_ws),
                                         "r" : _to_range(row + 1, 0, rhs_ws)}),
                         date_style)
-    
+
                 for col_i, col_name in enumerate(lhs_df.columns):
                     diffs_ws.write(0, col_i + 1,
                         xlwt.Formula("IF(EXACT(%(l)s,%(r)s),%(l)s,\"ERROR\")" % {
                                         "l" : _to_range(0, col_i + 1, lhs_ws),
                                         "r" : _to_range(0, col_i + 1, rhs_ws)}))
-    
+
                 for col_i in xrange(1, max_cols + 1):
                     for row_i in xrange(1, max_rows + 1):
                         if is_abs:
-                            diffs_ws.write(row_i,
-                                           col_i,
-                                           xlwt.Formula("ABS(%s-%s)" % (_to_range(row_i, col_i, lhs_ws),
-                                                                        _to_range(row_i, col_i, rhs_ws))))
+                            diffs_ws.write(
+                                row_i,
+                                col_i,
+                                xlwt.Formula(
+                                    f"ABS({_to_range(row_i, col_i, lhs_ws)}-{_to_range(row_i, col_i, rhs_ws)})"
+                                ),
+                            )
                         else:
-                            diffs_ws.write(row_i,
-                                           col_i,
-                                           xlwt.Formula("ABS((%s/%s)-1)" % (_to_range(row_i, col_i, lhs_ws),
-                                                                            _to_range(row_i, col_i, rhs_ws))))                                                                 
+                            diffs_ws.write(
+                                row_i,
+                                col_i,
+                                xlwt.Formula(
+                                    f"ABS(({_to_range(row_i, col_i, lhs_ws)}/{_to_range(row_i, col_i, rhs_ws)})-1)"
+                                ),
+                            )
         if nsheets:
             wb.save(filename)

@@ -12,19 +12,24 @@ This isn't adhere strictly to the Python grammar, it's just matched
 opening and closing braces to get lists of what look like Python
 expressions.
 """
+
 from pyparsing import *
 import inspect
 
 expr = Forward()
 
-name = Word(alphanums + "_")
+name = Word(f"{alphanums}_")
 integer = Word(nums)
 number = Word(nums) + Optional(".") + Optional(integer)
 date = Regex("\d{4}-\d{2}-\d{2}")
 num_processors = Regex("\|\|\s*\d+")
 
-named_parameter = name + "=" + (number | QuotedString("'") | QuotedString('"') | expr)
-dict_parameter = name + ":" + (number | QuotedString("'") | QuotedString('"') | expr)
+named_parameter = f"{name}=" + (
+    number | QuotedString("'") | QuotedString('"') | expr
+)
+dict_parameter = f"{name}:" + (
+    number | QuotedString("'") | QuotedString('"') | expr
+)
 
 enclosed = Forward()
 nested_parens = nestedExpr("(", ")", content=enclosed).leaveWhitespace()
@@ -43,8 +48,7 @@ item = (decl + nested_brackets).leaveWhitespace()
 #
 def get_node_assignment_expr(nodetype="varnode"):
     node_expr = nodetype + Optional(White()) + nested_parens
-    node_decl_expr = name + "=" + node_expr + Optional(pythonStyleComment)
-    return node_decl_expr
+    return f"{name}={node_expr}{Optional(pythonStyleComment)}"
 
 # e.g. decl.func()[item].func2()
 sub_expr = Forward()
@@ -102,20 +106,23 @@ def get_assigned_node_name(nodetype="varnode", stack_level=1):
         if len(tokens) == 1:
             # check that what matched was actually the line we were on, and not another varnode
             # declaration from earlier in the context
-            if tokens[0].strip() != statement.strip():
-                if tokens[0].strip() != statement.strip():
-                    raise AssertionError(("Error parsing line looking for %s name:\n" % nodetype) +
-                                         "'%s' != '%s'" % (tokens[0].strip(), statement.strip()))
+            if tokens[0].strip() not in [statement.strip(), statement.strip()]:
+                raise AssertionError(
+                    "Error parsing line looking for %s name:\n" % nodetype
+                    + f"'{tokens[0].strip()}' != '{statement.strip()}'"
+                )
 
             # split the line into the tokens making up the node declaration, and the first
             # one is always the variable name
             sub_tokens, start, end = next(decl_expr.scanString(statement))
-            name = sub_tokens[0]
-            return name
+            return sub_tokens[0]
+        raise AssertionError(
+            (
+                f"Could not infer name for {nodetype}. "
+                + f"Line '{context[last_line].strip()}' doesn't look like a {nodetype} assignment"
+            )
+        )
 
-        raise AssertionError(("Could not infer name for %s. " % nodetype) +
-                             ("Line '%s' doesn't look like a %s assignment" %
-                                 (context[last_line].strip(), nodetype)))
-
-    raise AssertionError(("Could not infer name for %s. " % nodetype) +
-                         ("No source code found - is the code cythoned?"))
+    raise AssertionError(
+        f"Could not infer name for {nodetype}. No source code found - is the code cythoned?"
+    )
